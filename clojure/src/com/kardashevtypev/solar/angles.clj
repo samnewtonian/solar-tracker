@@ -177,7 +177,7 @@
    Inputs:
      latitude  - Observer's latitude (degrees, positive = North)
      longitude - Observer's longitude (degrees, negative = West)
-     datetime  - A java.time.ZonedDateTime (or OffsetDateTime) with timezone info.
+     datetime  - A java.time.ZonedDateTime with timezone info.
                  Internally converted to UTC via .withZoneSameInstant.
 
    Returns a map containing:

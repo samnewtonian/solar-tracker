@@ -14,7 +14,7 @@
   (s/and number? #(<= -180 % 180)))
 
 (s/def ::datetime
-  #(instance? java.time.temporal.Temporal %))
+  #(instance? java.time.ZonedDateTime %))
 
 (s/def ::year
   pos-int?)
