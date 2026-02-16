@@ -8,10 +8,14 @@ Solar angle calculation library for computing optimal solar panel angles based o
 
 ## Project Status
 
-Early stage — no source code yet. Design documents live in `dev/archnotes/`:
+**Implemented:**
+- `solar.angles` — Core solar position and panel angle calculations (src/solar/angles.clj)
+- `solar.angles.spec` — Clojure specs for validation (src/solar/angles/spec.clj)
+- Comprehensive test suite (test/solar/angles_test.clj)
 
-- `solar-panel-angle-calculations.md` — Core solar position formulas (declination, hour angle, zenith, azimuth, equation of time) and panel angle calculations for all tracker types. Contains the reference Clojure implementation with two namespaces: `solar.angles` (core calculations) and usage examples.
-- `solar-angle-lookup-tables.md` — Precomputed lookup table design for embedded/real-time use. Covers table structures, compact encodings (int16, delta, polynomial), interpolation, and storage budgets. Contains reference `solar.lookup-table` namespace depending on `solar.angles`.
+**Design documents** in `dev/archnotes/`:
+- `solar-panel-angle-calculations.md` — Core solar position formulas (declination, hour angle, zenith, azimuth, equation of time) and panel angle calculations for all tracker types. Contains the reference Clojure implementation.
+- `solar-angle-lookup-tables.md` — Precomputed lookup table design for embedded/real-time use. Covers table structures, compact encodings (int16, delta, polynomial), interpolation, and storage budgets. Not yet implemented.
 
 ## Architecture (from design docs)
 
@@ -27,3 +31,19 @@ Early stage — no source code yet. Design documents live in `dev/archnotes/`:
 - Azimuth: 0° = North, 90° = East, 180° = South, 270° = West
 - Hour angle: negative = morning, positive = afternoon, 0° = solar noon
 - Default reference location: Springfield, IL (39.8°N, 89.6°W, std meridian -90°)
+
+## Git Commit Handling
+
+**GPG Signing:** Before creating commits, check if GPG signing is required:
+
+```bash
+git config --get commit.gpgsign
+```
+
+- If the result is `true`, **DO NOT** create commits automatically (GPG signing requires interactive passphrase entry)
+- Instead:
+  1. Stage the relevant files with `git add`
+  2. Print a commit message for the user to use manually
+  3. Inform the user they need to commit manually due to GPG signing: `git commit -m "message"`
+
+- If the result is empty or `false`, proceed with normal commit workflow
