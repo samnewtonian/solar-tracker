@@ -197,3 +197,219 @@
     (is (approx= 15.0 (a/hour-angle 13.0) 0.01) "1 PM = +15°")
     (is (approx= -15.0 (a/hour-angle 11.0) 0.01) "11 AM = -15°")
     (is (approx= 45.0 (a/hour-angle 15.0) 0.01) "3 PM = +45°")))
+
+;;; ============================================================
+;;; Conversion Utility Tests
+;;; ============================================================
+
+(deftest deg-rad-roundtrip-test
+  (testing "deg->rad and rad->deg are inverses"
+    (doseq [deg [0.0 45.0 90.0 180.0 270.0 360.0 -45.0 -180.0 123.456]]
+      (is (approx= deg (a/rad->deg (a/deg->rad deg)) 1e-10)
+          (str "Roundtrip for " deg "°"))))
+
+  (testing "Known conversions"
+    (is (approx= Math/PI (a/deg->rad 180.0) 1e-10))
+    (is (approx= (/ Math/PI 2) (a/deg->rad 90.0) 1e-10))
+    (is (approx= 0.0 (a/deg->rad 0.0) 1e-10))
+    (is (approx= 180.0 (a/rad->deg Math/PI) 1e-10))))
+
+;;; ============================================================
+;;; Edge Case Tests
+;;; ============================================================
+
+(deftest normalize-angle-edge-cases-test
+  (testing "Large positive and negative angles"
+    (is (approx= 0.0 (a/normalize-angle 720.0)) "Two full rotations")
+    (is (approx= 90.0 (a/normalize-angle 810.0)) "810° = 2×360 + 90")
+    (is (approx= 0.0 (a/normalize-angle -720.0)) "Negative two full rotations")
+    (is (approx= 270.0 (a/normalize-angle -450.0)) "-450° = -360 - 90 -> 270"))
+
+  (testing "Small angles near zero"
+    (is (approx= 0.001 (a/normalize-angle 0.001) 1e-6))
+    (is (approx= 359.999 (a/normalize-angle -0.001) 1e-6))))
+
+(deftest day-of-year-edge-cases-test
+  (testing "First day of each month (non-leap year 2026)"
+    (let [expected [1 32 60 91 121 152 182 213 244 274 305 335]]
+      (doseq [[month exp] (map vector (range 1 13) expected)]
+        (is (= exp (a/day-of-year 2026 month 1))
+            (str "First day of month " month)))))
+
+  (testing "First day of each month (leap year 2024)"
+    (let [expected [1 32 61 92 122 153 183 214 245 275 306 336]]
+      (doseq [[month exp] (map vector (range 1 13) expected)]
+        (is (= exp (a/day-of-year 2024 month 1))
+            (str "First day of month " month " (leap year)"))))))
+
+(deftest equator-solar-noon-equinox-test
+  (testing "Sun directly overhead at equator on equinox at solar noon"
+    ;; At the equator (0°N) on the equinox, the sun should be nearly overhead
+    ;; at solar noon. Using longitude 0° with std-meridian 0° for simplicity.
+    (let [pos (a/solar-position 0.0 0.0 2026 3 21 12 0 0.0)]
+      (is (approx= 0.0 (:declination pos) 1.0)
+          "Declination near 0° at equinox")
+      (is (< (:zenith pos) 5.0)
+          "Zenith near 0° (sun nearly overhead)")
+      (is (> (:altitude pos) 85.0)
+          "Altitude near 90° (sun nearly overhead)"))))
+
+(deftest polar-latitude-test
+  (testing "High-latitude behaviour near summer solstice"
+    ;; At 70°N on summer solstice around noon, sun should be above horizon
+    (let [pos (a/solar-position 70.0 15.0 2026 6 21 12 0 15.0)]
+      (is (> (:altitude pos) 0.0)
+          "Sun above horizon at 70°N on summer solstice")
+      (is (< (:zenith pos) 90.0)
+          "Zenith below 90° (sun visible)")))
+
+  (testing "High-latitude behaviour near winter solstice"
+    ;; At 70°N on winter solstice around noon, sun should be very low or below horizon
+    (let [pos (a/solar-position 70.0 15.0 2026 12 21 12 0 15.0)]
+      (is (> (:zenith pos) 85.0)
+          "Zenith very high at 70°N winter solstice (sun barely rises)"))))
+
+(deftest southern-hemisphere-test
+  (testing "Southern hemisphere seasons are reversed"
+    ;; Sydney, Australia: 33.9°S, 151.2°E, std meridian 150°
+    (let [pos-jun (a/solar-position -33.9 151.2 2026 6 21 12 0 150.0)
+          pos-dec (a/solar-position -33.9 151.2 2026 12 21 12 0 150.0)]
+      ;; June = winter in south, December = summer in south
+      (is (> (:zenith pos-jun) (:zenith pos-dec))
+          "Sun lower in June (winter) than December (summer) in southern hemisphere")
+      (is (< (:altitude pos-jun) (:altitude pos-dec))
+          "Altitude lower in winter than summer"))))
+
+(deftest midnight-position-test
+  (testing "Sun below horizon at midnight"
+    ;; Springfield at midnight on equinox
+    (let [pos (a/solar-position 39.8 -89.6 2026 3 21 0 0 -90.0)]
+      (is (< (:altitude pos) 0.0) "Sun below horizon at midnight")
+      (is (> (:zenith pos) 90.0) "Zenith > 90° when sun is below horizon"))))
+
+;;; ============================================================
+;;; Invariant / Property Tests
+;;; ============================================================
+
+(deftest zenith-altitude-complement-test
+  (testing "Zenith + altitude = 90 for various inputs"
+    (doseq [[lat lon yr mo dy hr mn std]
+            [[39.8 -89.6 2026 3 21 12 0 -90.0]
+             [0.0 0.0 2026 6 21 12 0 0.0]
+             [-33.9 151.2 2026 12 21 15 30 150.0]
+             [51.5 -0.1 2026 9 22 8 0 0.0]
+             [70.0 25.0 2026 6 21 18 0 30.0]]]
+      (let [pos (a/solar-position lat lon yr mo dy hr mn std)]
+        (is (approx= 90.0 (+ (:zenith pos) (:altitude pos)) 1e-10)
+            (str "zenith + altitude = 90 for lat=" lat " lon=" lon))))))
+
+(deftest azimuth-always-normalized-test
+  (testing "Azimuth always in [0, 360) for various locations and times"
+    (doseq [[lat lon yr mo dy hr mn std]
+            [[39.8 -89.6 2026 1 15 8 0 -90.0]
+             [39.8 -89.6 2026 1 15 16 0 -90.0]
+             [39.8 -89.6 2026 7 15 6 0 -90.0]
+             [39.8 -89.6 2026 7 15 20 0 -90.0]
+             [-45.0 170.0 2026 3 21 12 0 180.0]
+             [60.0 10.0 2026 6 21 3 0 15.0]
+             [0.0 0.0 2026 9 22 12 0 0.0]]]
+      (let [pos (a/solar-position lat lon yr mo dy hr mn std)]
+        (is (<= 0.0 (:azimuth pos)) (str "Azimuth >= 0 for " [lat lon hr]))
+        (is (< (:azimuth pos) 360.0) (str "Azimuth < 360 for " [lat lon hr]))))))
+
+(deftest declination-bounded-test
+  (testing "Declination always within [-23.45, +23.45] for all days"
+    (doseq [n (range 1 366)]
+      (let [decl (a/solar-declination n)]
+        (is (<= -23.45 decl 23.45)
+            (str "Declination out of bounds for day " n))))))
+
+(deftest equation-of-time-bounded-test
+  (testing "Equation of time within [-15, +17] minutes for all days"
+    (doseq [n (range 1 366)]
+      (let [eot (a/equation-of-time n)]
+        (is (<= -15.0 eot 17.0)
+            (str "EoT out of expected range for day " n ": " eot))))))
+
+(deftest zenith-non-negative-test
+  (testing "Zenith angle is always non-negative"
+    (doseq [[lat decl ha] [[0.0 0.0 0.0]
+                           [45.0 23.45 0.0]
+                           [-45.0 -23.45 0.0]
+                           [0.0 23.45 90.0]
+                           [89.0 23.45 0.0]
+                           [-89.0 -23.45 0.0]]]
+      (let [z (a/solar-zenith-angle lat decl ha)]
+        (is (<= 0.0 z 180.0)
+            (str "Zenith out of [0,180] for lat=" lat " decl=" decl " ha=" ha))))))
+
+(deftest dual-axis-panel-azimuth-normalized-test
+  (testing "Dual-axis panel azimuth always in [0, 360)"
+    (doseq [solar-az [0.0 45.0 90.0 135.0 180.0 225.0 270.0 315.0 359.9]]
+      (let [{:keys [panel-azimuth]} (a/dual-axis-angles {:zenith 30.0 :azimuth solar-az})]
+        (is (<= 0.0 panel-azimuth) (str "panel-azimuth >= 0 for solar-az=" solar-az))
+        (is (< panel-azimuth 360.0) (str "panel-azimuth < 360 for solar-az=" solar-az))))))
+
+;;; ============================================================
+;;; Cross-Location Comparison Tests
+;;; ============================================================
+
+(deftest multiple-cities-noon-equinox-test
+  (testing "Solar position at noon on equinox for various cities"
+    ;; At solar noon on equinox, zenith should approximately equal |latitude|
+    (let [cities [{:name "London" :lat 51.5 :lon -0.1 :std 0.0}
+                  {:name "Tokyo" :lat 35.7 :lon 139.7 :std 135.0}
+                  {:name "Cape Town" :lat -33.9 :lon 18.4 :std 30.0}
+                  {:name "Quito" :lat -0.2 :lon -78.5 :std -75.0}]]
+      (doseq [{:keys [name lat lon std]} cities]
+        (let [pos (a/solar-position lat lon 2026 3 21 12 0 std)]
+          ;; zenith ≈ |latitude| at equinox noon (within a few degrees due to
+          ;; EoT and longitude offset from std meridian)
+          (is (approx= (abs lat) (:zenith pos) 8.0)
+              (str name ": zenith ≈ |latitude| at equinox noon")))))))
+
+(deftest morning-afternoon-symmetry-test
+  (testing "Morning and afternoon positions are roughly symmetric around noon"
+    ;; At equinox, 3 hours before and after solar noon should give
+    ;; similar zenith but mirrored azimuth
+    (let [pos-9am (a/solar-position 39.8 -89.6 2026 3 21 9 0 -90.0)
+          pos-3pm (a/solar-position 39.8 -89.6 2026 3 21 15 0 -90.0)]
+      (is (approx= (:zenith pos-9am) (:zenith pos-3pm) 5.0)
+          "Zenith roughly symmetric 3h before/after noon")
+      ;; Azimuth should be roughly mirrored around 180° (south)
+      ;; Morning: < 180° (east of south), Afternoon: > 180° (west of south)
+      (is (< (:azimuth pos-9am) 180.0) "Morning azimuth east of south")
+      (is (> (:azimuth pos-3pm) 180.0) "Afternoon azimuth west of south"))))
+
+;;; ============================================================
+;;; Panel Angle Edge Cases
+;;; ============================================================
+
+(deftest fixed-tilt-symmetry-test
+  (testing "Fixed tilt is same for equal north/south latitudes"
+    (doseq [lat [10.0 25.0 40.0 55.0 70.0 85.0]]
+      (is (approx= (a/optimal-fixed-tilt lat)
+                    (a/optimal-fixed-tilt (- lat))
+                    1e-10)
+          (str "Symmetric for ±" lat "°"))))
+
+  (testing "Fixed tilt increases with latitude"
+    (let [tilts (map a/optimal-fixed-tilt [0.0 15.0 30.0 45.0 60.0 75.0 90.0])]
+      (is (= tilts (sort tilts))
+          "Tilt monotonically increases with latitude"))))
+
+(deftest seasonal-tilt-ordering-test
+  (testing "Summer < spring/fall < winter tilt for northern hemisphere"
+    (let [lat 40.0]
+      (is (< (a/seasonal-tilt-adjustment lat :summer)
+             (a/seasonal-tilt-adjustment lat :spring)
+             (a/seasonal-tilt-adjustment lat :winter))
+          "summer < spring/fall < winter")))
+
+  (testing "Seasonal tilt at equator"
+    (is (approx= -15.0 (a/seasonal-tilt-adjustment 0.0 :summer) 0.01)
+        "Equator summer tilt = -15°")
+    (is (approx= 15.0 (a/seasonal-tilt-adjustment 0.0 :winter) 0.01)
+        "Equator winter tilt = +15°")
+    (is (approx= 0.0 (a/seasonal-tilt-adjustment 0.0 :spring) 0.01)
+        "Equator spring tilt = 0°")))
