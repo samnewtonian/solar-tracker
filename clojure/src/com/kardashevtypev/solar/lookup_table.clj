@@ -13,7 +13,6 @@
   {:interval-minutes 5
    :latitude 39.8
    :longitude -89.6
-   :std-meridian -90.0
    :year 2026
    :sunrise-buffer-minutes 30
    :sunset-buffer-minutes 30})
@@ -113,34 +112,44 @@
 ;;; ============================================================
 
 (defn- generate-table
-  "Shared table generation. Iterates days 1-365, computes solar position
-   at each interval within the daylight window (plus buffers), and calls
-   entry-fn to produce each entry map.
+  "Shared table generation. Iterates days 1-365, computes solar angles
+   at each UTC-minute interval within the daylight window (plus buffers),
+   and calls entry-fn to produce each entry map.
 
-   entry-fn: (fn [minutes pos is-daylight?]) -> entry map
+   Tables are indexed by UTC minutes. Sunrise/sunset are estimated in local
+   solar time, then shifted to UTC using the longitude-based offset.
+
+   entry-fn: (fn [minutes angles is-daylight?]) -> entry map
+     where angles is the map from angles/solar-angles-at
    bytes-per-entry: used for storage estimate"
   [config entry-fn bytes-per-entry]
-  (let [{:keys [interval-minutes latitude longitude std-meridian year
+  (let [{:keys [interval-minutes latitude longitude year
                 sunrise-buffer-minutes sunset-buffer-minutes]} config
         n-intervals (intervals-per-day interval-minutes)
         days (vec
               (for [doy (range 1 366)]
-                (let [{:keys [sunrise sunset]} (estimate-sunrise-sunset latitude doy)
-                      start-minute (max 0 (- sunrise sunrise-buffer-minutes))
-                      end-minute (min 1439 (+ sunset sunset-buffer-minutes))
-                      [month day-of-month] (doy->month-day year doy)
+                (let [decl       (angles/solar-declination doy)
+                      eot        (angles/equation-of-time doy)
+                      correction (+ (/ (* 4.0 longitude) 60.0) (/ eot 60.0))
+                      ;; UTC offset in minutes: how many minutes to add to local solar time to get UTC
+                      utc-offset-minutes (long (* (/ (- longitude) 15.0) 60))
+                      {:keys [sunrise sunset]} (estimate-sunrise-sunset latitude doy)
+                      ;; Shift local sunrise/sunset to UTC minutes
+                      sunrise-utc (+ sunrise utc-offset-minutes)
+                      sunset-utc  (+ sunset utc-offset-minutes)
+                      start-minute (max 0 (- sunrise-utc sunrise-buffer-minutes))
+                      end-minute   (min 1439 (+ sunset-utc sunset-buffer-minutes))
                       entries (vec
                                (for [interval (range n-intervals)
                                      :let [minutes (* interval interval-minutes)]
                                      :when (and (>= minutes start-minute)
                                                 (<= minutes end-minute))]
-                                 (let [[hour minute] (minutes->time minutes)
-                                       pos (angles/solar-position latitude longitude year
-                                                                   month day-of-month
-                                                                   hour minute std-meridian)
-                                       is-daylight? (and (>= minutes sunrise)
-                                                         (<= minutes sunset))]
-                                   (entry-fn minutes pos is-daylight?))))]
+                                 (let [utc-hours    (/ minutes 60.0)
+                                       ang          (angles/solar-angles-at latitude decl correction utc-hours)
+                                       local-minutes (- minutes utc-offset-minutes)
+                                       is-daylight?  (and (>= local-minutes sunrise)
+                                                          (<= local-minutes sunset))]
+                                   (entry-fn minutes ang is-daylight?))))]
                   {:day-of-year doy
                    :sunrise-minutes sunrise
                    :sunset-minutes sunset

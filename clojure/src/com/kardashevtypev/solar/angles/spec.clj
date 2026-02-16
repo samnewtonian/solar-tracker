@@ -13,8 +13,8 @@
 (s/def ::longitude
   (s/and number? #(<= -180 % 180)))
 
-(s/def ::std-meridian
-  (s/and number? #(<= -180 % 180)))
+(s/def ::datetime
+  #(instance? java.time.temporal.Temporal %))
 
 (s/def ::year
   pos-int?)
@@ -24,12 +24,6 @@
 
 (s/def ::day
   (s/int-in 1 32))
-
-(s/def ::hour
-  (s/int-in 0 24))
-
-(s/def ::minute
-  (s/int-in 0 60))
 
 (s/def ::day-of-year
   (s/int-in 1 367))
@@ -95,12 +89,7 @@
 (s/fdef angles/solar-position
   :args (s/cat :latitude ::latitude
                :longitude ::longitude
-               :year ::year
-               :month ::month
-               :day ::day
-               :hour ::hour
-               :minute ::minute
-               :std-meridian ::std-meridian)
+               :datetime ::datetime)
   :ret ::solar-position-result)
 
 (s/fdef angles/single-axis-tilt

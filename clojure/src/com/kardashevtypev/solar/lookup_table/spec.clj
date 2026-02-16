@@ -16,9 +16,6 @@
 (s/def ::longitude
   (s/and number? #(<= -180 % 180)))
 
-(s/def ::std-meridian
-  (s/and number? #(<= -180 % 180)))
-
 (s/def ::year
   pos-int?)
 
@@ -32,7 +29,6 @@
   (s/keys :req-un [::interval-minutes
                    ::latitude
                    ::longitude
-                   ::std-meridian
                    ::year
                    ::sunrise-buffer-minutes
                    ::sunset-buffer-minutes]))
