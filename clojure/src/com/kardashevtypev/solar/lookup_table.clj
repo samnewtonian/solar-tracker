@@ -13,7 +13,6 @@
   {:interval-minutes 5
    :latitude 39.8
    :longitude -89.6
-   :std-meridian -90.0
    :year 2026
    :sunrise-buffer-minutes 30
    :sunset-buffer-minutes 30})
@@ -45,16 +44,13 @@
   "Convert day-of-year to [month day] for a given year.
    Walks the cumulative days-in-months vector."
   [year doy]
-  (let [leap? (or (zero? (mod year 400))
-                  (and (zero? (mod year 4))
-                       (not (zero? (mod year 100)))))
-        days-in-months [31 (if leap? 29 28) 31 30 31 30 31 31 30 31 30 31]]
+  (let [dim (angles/days-in-months year)]
     (loop [month 1
            remaining doy]
-      (let [dim (nth days-in-months (dec month))]
-        (if (<= remaining dim)
+      (let [d (nth dim (dec month))]
+        (if (<= remaining d)
           [month remaining]
-          (recur (inc month) (- remaining dim)))))))
+          (recur (inc month) (- remaining d)))))))
 
 ;;; ============================================================
 ;;; Sunrise/Sunset Estimation
@@ -112,35 +108,75 @@
 ;;; Table Generation
 ;;; ============================================================
 
-(defn- generate-table
-  "Shared table generation. Iterates days 1-365, computes solar position
-   at each interval within the daylight window (plus buffers), and calls
-   entry-fn to produce each entry map.
+(defn- compute-angles-fast
+  "Compute solar angles with precomputed trig values for latitude and declination.
+   Mirrors the formulas in angles/solar-zenith-angle and angles/solar-azimuth
+   but avoids redundant deg->rad and sin/cos calls on constant values.
+   Returns {:local-solar-time :hour-angle :zenith :altitude :azimuth}."
+  [sin-lat cos-lat sin-dec cos-dec correction utc-hours]
+  (let [lst       (mod (+ utc-hours correction) 24.0)
+        ha        (* angles/degrees-per-hour (- lst 12.0))
+        ha-rad    (angles/deg->rad ha)
+        cos-z     (+ (* sin-lat sin-dec)
+                     (* cos-lat cos-dec (math/cos ha-rad)))
+        zenith    (angles/rad->deg (math/acos (max -1.0 (min 1.0 cos-z))))
+        sin-az    (* -1.0 cos-dec (math/sin ha-rad))
+        cos-az    (- (* sin-dec cos-lat)
+                     (* cos-dec sin-lat (math/cos ha-rad)))]
+    {:local-solar-time lst
+     :hour-angle ha
+     :zenith zenith
+     :altitude (- 90.0 zenith)
+     :azimuth (angles/normalize-angle (angles/rad->deg (math/atan2 sin-az cos-az)))}))
 
-   entry-fn: (fn [minutes pos is-daylight?]) -> entry map
+(defn- generate-table
+  "Shared table generation. Iterates days 1-365/366, computes solar angles
+   at each UTC-minute interval within the daylight window (plus buffers),
+   and calls entry-fn to produce each entry map.
+
+   Tables are indexed by UTC minutes. Sunrise/sunset are estimated in local
+   solar time, then shifted to UTC using the full correction (longitude + EoT).
+
+   entry-fn: (fn [minutes angles is-daylight?]) -> entry map
+     where angles is the map from compute-angles-fast
    bytes-per-entry: used for storage estimate"
   [config entry-fn bytes-per-entry]
-  (let [{:keys [interval-minutes latitude longitude std-meridian year
+  (let [{:keys [interval-minutes latitude longitude year
                 sunrise-buffer-minutes sunset-buffer-minutes]} config
         n-intervals (intervals-per-day interval-minutes)
+        lat-rad (angles/deg->rad latitude)
+        sin-lat (math/sin lat-rad)
+        cos-lat (math/cos lat-rad)
+        n-days (if (angles/leap-year? year) 366 365)
         days (vec
-              (for [doy (range 1 366)]
-                (let [{:keys [sunrise sunset]} (estimate-sunrise-sunset latitude doy)
-                      start-minute (max 0 (- sunrise sunrise-buffer-minutes))
-                      end-minute (min 1439 (+ sunset sunset-buffer-minutes))
-                      [month day-of-month] (doy->month-day year doy)
+              (for [doy (range 1 (inc n-days))]
+                (let [decl       (angles/solar-declination doy)
+                      eot        (angles/equation-of-time doy)
+                      correction (angles/utc-lst-correction longitude eot)
+                      ;; Full correction in minutes (longitude + EoT) for UTC↔LST conversion
+                      correction-minutes (* correction 60.0)
+                      dec-rad (angles/deg->rad decl)
+                      sin-dec (math/sin dec-rad)
+                      cos-dec (math/cos dec-rad)
+                      {:keys [sunrise sunset]} (estimate-sunrise-sunset latitude doy)
+                      ;; Shift local solar sunrise/sunset to UTC minutes
+                      sunrise-utc (long (- sunrise correction-minutes))
+                      sunset-utc  (long (- sunset correction-minutes))
+                      start-minute (max 0 (- sunrise-utc sunrise-buffer-minutes))
+                      end-minute   (min 1439 (+ sunset-utc sunset-buffer-minutes))
                       entries (vec
                                (for [interval (range n-intervals)
                                      :let [minutes (* interval interval-minutes)]
                                      :when (and (>= minutes start-minute)
                                                 (<= minutes end-minute))]
-                                 (let [[hour minute] (minutes->time minutes)
-                                       pos (angles/solar-position latitude longitude year
-                                                                   month day-of-month
-                                                                   hour minute std-meridian)
-                                       is-daylight? (and (>= minutes sunrise)
-                                                         (<= minutes sunset))]
-                                   (entry-fn minutes pos is-daylight?))))]
+                                 (let [utc-hours     (/ minutes 60.0)
+                                       ang           (compute-angles-fast sin-lat cos-lat
+                                                                         sin-dec cos-dec
+                                                                         correction utc-hours)
+                                       local-minutes (long (+ minutes correction-minutes))
+                                       is-daylight?  (and (>= local-minutes sunrise)
+                                                          (<= local-minutes sunset))]
+                                   (entry-fn minutes ang is-daylight?))))]
                   {:day-of-year doy
                    :sunrise-minutes sunrise
                    :sunset-minutes sunset

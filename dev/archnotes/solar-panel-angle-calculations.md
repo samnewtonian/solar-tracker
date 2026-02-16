@@ -22,7 +22,7 @@ For **dual-axis tracking**, both tilt and azimuth orientation change to follow t
 |--------|------|------|-------------|
 | φ | Latitude | degrees | Geographic latitude (positive = North) |
 | λ | Longitude | degrees | Geographic longitude (positive = East) |
-| n | Day of Year | integer | Julian day (Jan 1 = 1, Dec 31 = 365/366) |
+| n | Day of Year | integer | Ordinal day (Jan 1 = 1, Dec 31 = 365/366) |
 | δ | Solar Declination | degrees | Angle between sun's rays and Earth's equatorial plane |
 | h | Hour Angle | degrees | Angular displacement of sun from solar noon |
 | θz | Zenith Angle | degrees | Angle from vertical to sun position |
@@ -38,7 +38,7 @@ For **dual-axis tracking**, both tilt and azimuth orientation change to follow t
 
 ### Step 1: Calculate Day of Year (n)
 
-Convert calendar date to Julian day number (1-365 or 1-366 for leap years).
+Convert calendar date to ordinal day of year (1-365 or 1-366 for leap years).
 
 ```
 n = day_of_year(date)
@@ -86,26 +86,23 @@ This correction ranges from approximately -14 to +16 minutes throughout the year
 
 ### Step 4: Calculate Local Solar Time (LST)
 
-Convert clock time to true solar time:
+Convert clock time to true solar time. **UTC input is required** — this avoids DST complications entirely. The calling code accepts a timezone-aware datetime (`ZonedDateTime`) and converts to UTC internally, so DST handling stays at the system boundary.
+
+The UTC→LST correction is constant for a given day and longitude:
 
 ```
-LST = LT + (4 × (L_st - L_loc)) / 60 + E / 60
+correction = (4 × L_loc) / 60 + E / 60    (hours)
+LST = mod(UTC_hours + correction, 24)
 ```
 
 Where:
-- `LT` = Local clock time in decimal hours (e.g., 2:30 PM = 14.5)
-- `L_st` = Standard meridian for local time zone (e.g., -90° for US Central)
-- `L_loc` = Local longitude (negative for West)
+- `UTC_hours` = Time in UTC as decimal hours (e.g., 7:30 PM UTC = 19.5)
+- `L_loc` = Local longitude in degrees (negative for West)
 - `E` = Equation of Time (minutes)
 
-**Time Zone Standard Meridians:**
-| Time Zone | Standard Meridian |
-|-----------|-------------------|
-| US Eastern (EST/EDT) | -75° |
-| US Central (CST/CDT) | -90° |
-| US Mountain (MST/MDT) | -105° |
-| US Pacific (PST/PDT) | -120° |
-| UTC | 0° |
+The `mod 24` handles day boundary wraparound.
+
+**Why UTC, not local time:** An earlier version of this library used a `local-solar-time` formula with an explicit `std-meridian` parameter: `LST = LT + (4 × (L_loc - L_st)) / 60 + E / 60`. This was fragile — callers had to manually subtract 1 hour during DST, and the `std-meridian` was a political/administrative concept disconnected from the physical calculation. The UTC approach eliminates both problems: the physical correction depends only on longitude (a constant), and timezone-aware datetime objects handle DST transitions automatically.
 
 ---
 
@@ -288,10 +285,11 @@ Optimal Tilt = 0.76 × 40 + 3.1 = 33.5°
 ## Clojure Reference Implementation
 
 ```clojure
-(ns solar.angles
+(ns com.kardashevtypev.solar.angles
   "Solar panel angle calculations for single and dual-axis tracking systems.
    All angles in degrees unless otherwise noted."
-  (:require [clojure.math :as math]))
+  (:require [clojure.math :as math])
+  (:import [java.time ZonedDateTime ZoneOffset]))
 
 ;;; ============================================================
 ;;; Constants and Conversion Utilities
@@ -299,35 +297,37 @@ Optimal Tilt = 0.76 × 40 + 3.1 = 33.5°
 
 (def ^:const earth-axial-tilt 23.45)
 (def ^:const degrees-per-hour 15.0)
+(def ^:const deg->rad-factor (/ math/PI 180.0))
+(def ^:const rad->deg-factor (/ 180.0 math/PI))
 
-(defn deg->rad
-  "Convert degrees to radians."
-  [deg]
-  (* deg (/ math/PI 180.0)))
-
-(defn rad->deg
-  "Convert radians to degrees."
-  [rad]
-  (* rad (/ 180.0 math/PI)))
+(defn deg->rad [deg] (* deg deg->rad-factor))
+(defn rad->deg [rad] (* rad rad->deg-factor))
 
 (defn normalize-angle
   "Normalize angle to 0-360 degree range."
   [angle]
-  (mod (+ (mod angle 360.0) 360.0) 360.0))
+  (mod angle 360.0))
 
 ;;; ============================================================
 ;;; Date Utilities
 ;;; ============================================================
 
+(defn leap-year?
+  "Returns true if year is a leap year."
+  [year]
+  (or (zero? (mod year 400))
+      (and (zero? (mod year 4))
+           (not (zero? (mod year 100))))))
+
+(defn days-in-months
+  "Returns a vector of days per month for the given year."
+  [year]
+  [31 (if (leap-year? year) 29 28) 31 30 31 30 31 31 30 31 30 31])
+
 (defn day-of-year
-  "Calculate day of year (1-366) from year, month, day.
-   Uses the standard algorithm accounting for leap years."
+  "Calculate ordinal day of year (1-366) from year, month, day."
   [year month day]
-  (let [leap? (or (zero? (mod year 400))
-                  (and (zero? (mod year 4))
-                       (not (zero? (mod year 100)))))
-        days-in-months [31 (if leap? 29 28) 31 30 31 30 31 31 30 31 30 31]
-        days-before-month (reduce + (take (dec month) days-in-months))]
+  (let [days-before-month (reduce + (take (dec month) (days-in-months year)))]
     (+ days-before-month day)))
 
 ;;; ============================================================
@@ -344,10 +344,7 @@ Optimal Tilt = 0.76 × 40 + 3.1 = 33.5°
 (defn equation-of-time
   "Calculate the Equation of Time correction.
    Input: n = day of year (1-365)
-   Output: correction in minutes
-   
-   This accounts for Earth's elliptical orbit and axial tilt,
-   causing solar noon to drift from clock noon throughout the year."
+   Output: correction in minutes"
   [n]
   (let [b (intermediate-angle-b n)]
     (* 229.18
@@ -357,56 +354,23 @@ Optimal Tilt = 0.76 × 40 + 3.1 = 33.5°
           (* -0.014615 (math/cos (* 2 b)))
           (* -0.040849 (math/sin (* 2 b)))))))
 
-(defn local-solar-time
-  "Calculate Local Solar Time from clock time.
-   Inputs:
-     local-time     - Clock time in decimal hours (e.g., 14.5 for 2:30 PM)
-     std-meridian   - Standard meridian for time zone (degrees, negative for West)
-     local-longitude - Observer's longitude (degrees, negative for West)
-     day-of-year    - Day number (1-365)
-   Output: Local solar time in decimal hours"
-  [local-time std-meridian local-longitude day-of-year]
-  (let [eot (equation-of-time day-of-year)
-        ;; Longitude correction: 4 minutes per degree difference
-        long-correction (/ (* 4.0 (- std-meridian local-longitude)) 60.0)
-        ;; Equation of time correction (convert from minutes to hours)
-        eot-correction (/ eot 60.0)]
-    (+ local-time long-correction eot-correction)))
-
 (defn hour-angle
   "Calculate the hour angle from local solar time.
    Input: local-solar-time in decimal hours
-   Output: hour angle in degrees
-   
-   Properties:
-     - At solar noon: h = 0°
-     - Morning: h < 0° (sun is east)
-     - Afternoon: h > 0° (sun is west)
-     - Each hour = 15° of Earth rotation"
+   Output: hour angle in degrees"
   [local-solar-time]
   (* degrees-per-hour (- local-solar-time 12.0)))
 
 (defn solar-declination
   "Calculate solar declination angle.
    Input: n = day of year (1-365)
-   Output: declination in degrees
-   
-   The declination is the angle between the sun and Earth's equatorial plane.
-   Ranges from -23.45° (winter solstice) to +23.45° (summer solstice)."
+   Output: declination in degrees"
   [n]
   (* earth-axial-tilt
      (math/sin (deg->rad (* 360.0 (/ (+ 284 n) 365.0))))))
 
 (defn solar-zenith-angle
-  "Calculate the solar zenith angle.
-   Inputs:
-     latitude    - Observer's latitude in degrees (positive = North)
-     declination - Solar declination in degrees
-     hour-angle  - Hour angle in degrees
-   Output: zenith angle in degrees
-   
-   The zenith angle is the angle between the sun and vertical (straight up).
-   At solar noon on the equinox at the equator, zenith = 0°."
+  "Calculate the solar zenith angle."
   [latitude declination hour-angle]
   (let [lat-rad (deg->rad latitude)
         dec-rad (deg->rad declination)
@@ -415,89 +379,69 @@ Optimal Tilt = 0.76 × 40 + 3.1 = 33.5°
                       (* (math/cos lat-rad)
                          (math/cos dec-rad)
                          (math/cos ha-rad)))]
-    ;; Clamp to [-1, 1] to handle floating point errors
     (rad->deg (math/acos (max -1.0 (min 1.0 cos-zenith))))))
 
-(defn solar-altitude
-  "Calculate solar altitude (elevation) angle.
-   Input: zenith-angle in degrees
-   Output: altitude in degrees above horizon
-   
-   The altitude is simply the complement of the zenith angle."
-  [zenith-angle]
-  (- 90.0 zenith-angle))
+(defn solar-altitude [zenith-angle] (- 90.0 zenith-angle))
 
 (defn solar-azimuth
-  "Calculate solar azimuth angle using atan2 for proper quadrant handling.
-   Inputs:
-     latitude    - Observer's latitude in degrees
-     declination - Solar declination in degrees
-     hour-angle  - Hour angle in degrees
-     zenith-angle - Solar zenith angle in degrees
-   Output: azimuth in degrees (0° = North, 90° = East, 180° = South, 270° = West)
-   
-   Uses the robust atan2-based formula to avoid quadrant ambiguity."
-  [latitude declination hour-angle zenith-angle]
+  "Calculate solar azimuth angle using atan2 for proper quadrant handling."
+  [latitude declination hour-angle]
   (let [lat-rad (deg->rad latitude)
         dec-rad (deg->rad declination)
         ha-rad (deg->rad hour-angle)
-        alt-rad (deg->rad (solar-altitude zenith-angle))
-        
-        ;; Calculate azimuth using atan2 for proper quadrant handling
         sin-az (* -1.0 (math/cos dec-rad) (math/sin ha-rad))
         cos-az (- (* (math/sin dec-rad) (math/cos lat-rad))
-                  (* (math/cos dec-rad) (math/sin lat-rad) (math/cos ha-rad)))
-        
-        ;; atan2 gives result in radians, in range [-π, π]
-        az-rad (math/atan2 sin-az cos-az)]
-    
-    ;; Convert to degrees and normalize to [0, 360)
-    (normalize-angle (rad->deg az-rad))))
+                  (* (math/cos dec-rad) (math/sin lat-rad) (math/cos ha-rad)))]
+    (normalize-angle (rad->deg (math/atan2 sin-az cos-az)))))
+
+(defn utc-lst-correction
+  "Compute the UTC→LST correction in hours for a given longitude and equation of time.
+   LST = mod(utc-hours + correction, 24).
+   Constant for a given day and longitude — compute once per day."
+  [longitude eot]
+  (+ (/ (* 4.0 longitude) 60.0) (/ eot 60.0)))
+
+(defn solar-angles-at
+  "Compute solar angles from precomputed day-constants and UTC time.
+   Returns {:local-solar-time :hour-angle :zenith :altitude :azimuth}.
+   Used by both solar-position and lookup-table generation."
+  [latitude decl correction utc-hours]
+  (let [lst    (mod (+ utc-hours correction) 24.0)
+        ha     (hour-angle lst)
+        zenith (solar-zenith-angle latitude decl ha)
+        alt    (solar-altitude zenith)
+        azim   (solar-azimuth latitude decl ha)]
+    {:local-solar-time lst
+     :hour-angle ha
+     :zenith zenith
+     :altitude alt
+     :azimuth azim}))
 
 ;;; ============================================================
 ;;; High-Level Solar Position Function
 ;;; ============================================================
 
 (defn solar-position
-  "Calculate complete solar position for given location, date, and time.
-   
+  "Calculate complete solar position for given location and timezone-aware datetime.
+
    Inputs:
-     latitude        - Observer's latitude (degrees, positive = North)
-     longitude       - Observer's longitude (degrees, negative = West)
-     year            - Calendar year
-     month           - Month (1-12)
-     day             - Day of month (1-31)
-     hour            - Hour in 24-hour format (0-23)
-     minute          - Minute (0-59)
-     std-meridian    - Standard meridian for time zone (degrees)
-   
+     latitude  - Observer's latitude (degrees, positive = North)
+     longitude - Observer's longitude (degrees, negative = West)
+     datetime  - A java.time.ZonedDateTime with timezone info.
+                 Internally converted to UTC via .withZoneSameInstant.
+
    Returns a map containing:
-     :day-of-year    - Julian day number
-     :declination    - Solar declination (degrees)
-     :equation-of-time - Equation of time correction (minutes)
-     :local-solar-time - True solar time (decimal hours)
-     :hour-angle     - Hour angle (degrees)
-     :zenith         - Solar zenith angle (degrees)
-     :altitude       - Solar altitude/elevation (degrees)
-     :azimuth        - Solar azimuth (degrees, 0° = North)"
-  [latitude longitude year month day hour minute std-meridian]
-  (let [n (day-of-year year month day)
-        local-time (+ hour (/ minute 60.0))
-        eot (equation-of-time n)
-        lst (local-solar-time local-time std-meridian longitude n)
-        ha (hour-angle lst)
-        decl (solar-declination n)
-        zenith (solar-zenith-angle latitude decl ha)
-        alt (solar-altitude zenith)
-        azim (solar-azimuth latitude decl ha zenith)]
-    {:day-of-year n
-     :declination decl
-     :equation-of-time eot
-     :local-solar-time lst
-     :hour-angle ha
-     :zenith zenith
-     :altitude alt
-     :azimuth azim}))
+     :day-of-year, :declination, :equation-of-time, :local-solar-time,
+     :hour-angle, :zenith, :altitude, :azimuth"
+  [latitude longitude datetime]
+  (let [utc        (.withZoneSameInstant datetime ZoneOffset/UTC)
+        utc-hours  (+ (.getHour utc) (/ (.getMinute utc) 60.0) (/ (.getSecond utc) 3600.0))
+        n          (day-of-year (.getYear utc) (.getMonthValue utc) (.getDayOfMonth utc))
+        eot        (equation-of-time n)
+        decl       (solar-declination n)
+        correction (utc-lst-correction longitude eot)
+        angles     (solar-angles-at latitude decl correction utc-hours)]
+    (merge {:day-of-year n :declination decl :equation-of-time eot} angles)))
 
 ;;; ============================================================
 ;;; Panel Angle Calculations
@@ -505,26 +449,17 @@ Optimal Tilt = 0.76 × 40 + 3.1 = 33.5°
 
 (defn single-axis-tilt
   "Calculate optimal tilt angle for single-axis (north-south) tracker.
-   
-   For a horizontal single-axis tracker with north-south orientation,
-   the tracker rotates to follow the sun's daily east-west arc.
-   
-   Input: solar-position map from (solar-position ...)
+   Input: solar-position map, latitude
    Output: rotation angle in degrees (positive = tilted toward west)"
-  [{:keys [hour-angle] :as solar-pos} latitude]
+  [{:keys [hour-angle]} latitude]
   (let [ha-rad (deg->rad hour-angle)
         lat-rad (deg->rad latitude)]
-    (rad->deg (math/atan (/ (math/tan ha-rad)
-                            (math/cos lat-rad))))))
+    (rad->deg (math/atan (/ (math/tan ha-rad) (math/cos lat-rad))))))
 
 (defn dual-axis-angles
   "Calculate optimal angles for dual-axis tracker.
-   
-   Returns both the panel tilt and azimuth needed to point
-   directly at the sun.
-   
-   Input: solar-position map from (solar-position ...)
-   Output: map with :tilt and :azimuth in degrees"
+   Input: solar-position map
+   Output: map with :tilt and :panel-azimuth in degrees"
   [{:keys [zenith azimuth]}]
   {:tilt zenith
    :panel-azimuth (normalize-angle (+ azimuth 180.0))})
@@ -533,102 +468,47 @@ Optimal Tilt = 0.76 × 40 + 3.1 = 33.5°
 ;;; Fixed Installation Helpers
 ;;; ============================================================
 
-(defn optimal-fixed-tilt
-  "Calculate optimal annual fixed tilt angle for a given latitude.
-   Uses the empirical formula: tilt = 0.76 × |latitude| + 3.1°
-   
-   Input: latitude in degrees
-   Output: optimal fixed tilt angle in degrees"
-  [latitude]
+(defn optimal-fixed-tilt [latitude]
   (+ (* 0.76 (abs latitude)) 3.1))
 
-(defn seasonal-tilt-adjustment
-  "Calculate seasonal tilt adjustment for fixed installations.
-   
-   Inputs:
-     latitude - Observer's latitude (degrees)
-     season   - One of :summer, :winter, :spring, :fall
-   Output: recommended tilt angle in degrees"
-  [latitude season]
+(defn seasonal-tilt-adjustment [latitude season]
   (case season
     :summer (- (abs latitude) 15.0)
     :winter (+ (abs latitude) 15.0)
     (:spring :fall) (abs latitude)))
 
 ;;; ============================================================
-;;; Example Usage and Demonstration
+;;; Example Usage
 ;;; ============================================================
 
-(defn example-calculation
-  "Demonstrate calculations for Springfield, IL on March 21 at solar noon.
-   Springfield, IL: 39.8°N, 89.6°W
-   Central Time Zone standard meridian: -90°"
-  []
-  (let [;; Location: Springfield, IL
-        latitude 39.8
+(defn example-calculation []
+  (let [latitude 39.8
         longitude -89.6
-        std-meridian -90.0
-        
-        ;; Date: March 21 (Spring Equinox)
-        year 2026
-        month 3
-        day 21
-        
-        ;; Time: approximately solar noon (accounting for longitude offset)
-        hour 12
-        minute 0
-        
-        ;; Calculate solar position
-        pos (solar-position latitude longitude year month day hour minute std-meridian)
-        
-        ;; Calculate panel angles
+        datetime (ZonedDateTime/of 2026 3 21 12 0 0 0 (java.time.ZoneId/of "America/Chicago"))
+        pos (solar-position latitude longitude datetime)
         single-axis (single-axis-tilt pos latitude)
-        dual-axis (dual-axis-angles pos)
-        fixed-annual (optimal-fixed-tilt latitude)]
-    
-    (println "=== Solar Position Calculation Example ===")
+        dual-axis (dual-axis-angles pos)]
     (println (format "Location: Springfield, IL (%.1f°N, %.1f°W)" latitude (- longitude)))
-    (println (format "Date: %d-%02d-%02d" year month day))
-    (println (format "Time: %02d:%02d local time" hour minute))
-    (println)
-    (println "--- Solar Position ---")
-    (println (format "Day of year: %d" (:day-of-year pos)))
-    (println (format "Declination: %.2f°" (:declination pos)))
-    (println (format "Equation of Time: %.2f minutes" (:equation-of-time pos)))
-    (println (format "Local Solar Time: %.2f hours" (:local-solar-time pos)))
-    (println (format "Hour Angle: %.2f°" (:hour-angle pos)))
-    (println (format "Zenith Angle: %.2f°" (:zenith pos)))
-    (println (format "Altitude: %.2f°" (:altitude pos)))
-    (println (format "Azimuth: %.2f° (0°=N, 90°=E, 180°=S)" (:azimuth pos)))
-    (println)
-    (println "--- Optimal Panel Angles ---")
-    (println (format "Single-axis tracker rotation: %.2f°" single-axis))
-    (println (format "Dual-axis tilt: %.2f°" (:tilt dual-axis)))
-    (println (format "Dual-axis panel azimuth: %.2f°" (:panel-azimuth dual-axis)))
-    (println (format "Fixed annual optimal tilt: %.1f°" fixed-annual))
-    (println)
-    
-    ;; Return the data for programmatic use
-    {:solar-position pos
-     :single-axis-rotation single-axis
-     :dual-axis dual-axis
-     :fixed-optimal-tilt fixed-annual}))
+    (println (format "Datetime: %s" datetime))
+    (println (format "Zenith: %.2f°  Altitude: %.2f°  Azimuth: %.2f°"
+                     (:zenith pos) (:altitude pos) (:azimuth pos)))
+    (println (format "Single-axis rotation: %.2f°" single-axis))
+    (println (format "Dual-axis tilt: %.2f°  azimuth: %.2f°"
+                     (:tilt dual-axis) (:panel-azimuth dual-axis)))))
 
 (comment
-  ;; Run the example
   (example-calculation)
-  
+
   ;; Calculate position for a specific time
-  (solar-position 39.8 -89.6 2026 6 21 14 30 -90.0)
-  
+  (solar-position 39.8 -89.6
+                  (ZonedDateTime/of 2026 6 21 14 30 0 0
+                                    (java.time.ZoneId/of "America/Chicago")))
+
   ;; Get dual-axis angles
-  (-> (solar-position 39.8 -89.6 2026 6 21 14 30 -90.0)
+  (-> (solar-position 39.8 -89.6
+                      (ZonedDateTime/of 2026 6 21 14 30 0 0
+                                        (java.time.ZoneId/of "America/Chicago")))
       (dual-axis-angles))
-  
-  ;; Calculate for summer solstice at noon
-  (let [pos (solar-position 39.8 -89.6 2026 6 21 12 0 -90.0)]
-    {:zenith (:zenith pos)
-     :summer-tilt (seasonal-tilt-adjustment 39.8 :summer)})
   )
 ```
 
@@ -638,7 +518,7 @@ Optimal Tilt = 0.76 × 40 + 3.1 = 33.5°
 
 **Location:** Springfield, IL (39.8°N, 89.6°W)  
 **Date:** March 21, 2026 (Spring Equinox)  
-**Time:** Solar Noon (approximately 12:00 local time)
+**Time:** Solar Noon (~18:00 UTC)
 
 ### Step-by-Step Calculation
 
@@ -654,10 +534,10 @@ Optimal Tilt = 0.76 × 40 + 3.1 = 33.5°
    E ≈ -7.5 minutes (mid-March)
    ```
 
-4. **Local Solar Time:**
+4. **UTC→LST Correction and Local Solar Time:**
    ```
-   LST = 12 + (4 × (-90 - (-89.6))) / 60 + (-7.5) / 60
-   LST ≈ 11.9 hours
+   correction = (4 × (-89.6)) / 60 + (-7.5) / 60 = -5.97 - 0.125 = -6.1 hours
+   LST = mod(18.0 + (-6.1), 24) ≈ 11.9 hours
    ```
 
 5. **Hour Angle:**

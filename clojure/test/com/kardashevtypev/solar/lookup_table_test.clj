@@ -3,13 +3,8 @@
             [clojure.spec.alpha :as s]
             [com.kardashevtypev.solar.lookup-table :as lt]
             [com.kardashevtypev.solar.lookup-table.spec :as lts]
-            [com.kardashevtypev.solar.angles :as angles]))
-
-(defn approx=
-  "Test if two numbers are approximately equal within tolerance."
-  ([a b] (approx= a b 0.1))
-  ([a b tolerance]
-   (< (abs (- a b)) tolerance)))
+            [com.kardashevtypev.solar.angles :as angles]
+            [com.kardashevtypev.solar.test-util :refer [approx=]]))
 
 ;;; ============================================================
 ;;; Config Validation
@@ -114,8 +109,8 @@
           (is (contains? entry :minutes) "Has :minutes")
           (is (contains? entry :rotation) "Has :rotation")))
 
-      (testing "Rotation near 0 at noon"
-        (let [noon-entry (first (filter #(= 720 (:minutes %)) (:entries day-80)))]
+      (testing "Rotation near 0 at noon (UTC ~1080 for Springfield)"
+        (let [noon-entry (first (filter #(= 1080 (:minutes %)) (:entries day-80)))]
           (when noon-entry
             (is (some? (:rotation noon-entry)) "Noon should be daylight")
             (is (approx= 0.0 (:rotation noon-entry) 5.0)
@@ -123,8 +118,13 @@
 
       (testing "Morning negative, afternoon positive rotation"
         (let [entries (:entries day-80)
-              morning (first (filter #(and (:rotation %) (< (:minutes %) 600)) entries))
-              afternoon (first (filter #(and (:rotation %) (> (:minutes %) 840)) entries))]
+              ;; Use entries within ~2h of noon (UTC 1080) to avoid atan wraparound
+              ;; near sunrise/sunset where |hour-angle| > 90°
+              morning (first (filter #(and (:rotation %)
+                                           (>= (:minutes %) 960)
+                                           (< (:minutes %) 1065)) entries))
+              afternoon (first (filter #(and (:rotation %)
+                                             (> (:minutes %) 1095)) entries))]
           (when morning
             (is (< (:rotation morning) 0.0) "Morning rotation is negative"))
           (when afternoon
@@ -148,8 +148,8 @@
           (is (contains? entry :tilt) "Has :tilt")
           (is (contains? entry :panel-azimuth) "Has :panel-azimuth")))
 
-      (testing "Tilt matches zenith at noon"
-        (let [noon-entry (first (filter #(= 720 (:minutes %)) (:entries day-80)))]
+      (testing "Tilt matches zenith at noon (UTC ~1080 for Springfield)"
+        (let [noon-entry (first (filter #(= 1080 (:minutes %)) (:entries day-80)))]
           (when noon-entry
             (is (some? (:tilt noon-entry)) "Noon tilt present")
             ;; Tilt = zenith for dual-axis; at Springfield equinox noon ~40°
@@ -185,40 +185,40 @@
 ;;; ============================================================
 
 (deftest lookup-single-axis-test
-  (testing "Lookup at exact interval boundary"
+  (testing "Lookup at exact interval boundary (UTC minutes)"
     (let [config (assoc lt/default-config :interval-minutes 15)
           table (lt/generate-single-axis-table config)
-          ;; Look up at noon on equinox (exact boundary)
-          result (lt/lookup-single-axis table 80 720)]
+          ;; Look up at noon on equinox (UTC 1080 ≈ local noon for Springfield)
+          result (lt/lookup-single-axis table 80 1080)]
       (is (some? result) "Found result")
-      (is (= 720 (:minutes result)))
+      (is (= 1080 (:minutes result)))
       (is (some? (:rotation result)) "Has rotation")))
 
   (testing "Lookup between intervals (interpolated)"
     (let [config (assoc lt/default-config :interval-minutes 15)
           table (lt/generate-single-axis-table config)
-          ;; Look up at 12:07 (between 12:00 and 12:15)
-          result (lt/lookup-single-axis table 80 727)
+          ;; Look up between 1080 and 1095 (between UTC 18:00 and 18:15)
+          result (lt/lookup-single-axis table 80 1087)
           ;; Also get the boundary values
-          at-720 (lt/lookup-single-axis table 80 720)
-          at-735 (lt/lookup-single-axis table 80 735)]
+          at-1080 (lt/lookup-single-axis table 80 1080)
+          at-1095 (lt/lookup-single-axis table 80 1095)]
       (is (some? result) "Found interpolated result")
-      (is (= 727 (:minutes result)))
-      (when (and (:rotation at-720) (:rotation at-735) (:rotation result))
-        (let [r720 (:rotation at-720)
-              r735 (:rotation at-735)
-              r727 (:rotation result)
-              lo (min r720 r735)
-              hi (max r720 r735)]
-          (is (and (>= r727 (- lo 0.01))
-                   (<= r727 (+ hi 0.01)))
+      (is (= 1087 (:minutes result)))
+      (when (and (:rotation at-1080) (:rotation at-1095) (:rotation result))
+        (let [r1080 (:rotation at-1080)
+              r1095 (:rotation at-1095)
+              r1087 (:rotation result)
+              lo (min r1080 r1095)
+              hi (max r1080 r1095)]
+          (is (and (>= r1087 (- lo 0.01))
+                   (<= r1087 (+ hi 0.01)))
               "Interpolated value between neighbors"))))))
 
 (deftest lookup-dual-axis-test
-  (testing "Lookup dual-axis at exact boundary"
+  (testing "Lookup dual-axis at exact boundary (UTC minutes)"
     (let [config (assoc lt/default-config :interval-minutes 15)
           table (lt/generate-dual-axis-table config)
-          result (lt/lookup-dual-axis table 80 720)]
+          result (lt/lookup-dual-axis table 80 1080)]
       (is (some? result) "Found result")
       (is (some? (:tilt result)) "Has tilt")
       (is (some? (:panel-azimuth result)) "Has panel-azimuth")))
@@ -226,7 +226,7 @@
   (testing "Lookup dual-axis interpolated"
     (let [config (assoc lt/default-config :interval-minutes 15)
           table (lt/generate-dual-axis-table config)
-          result (lt/lookup-dual-axis table 80 727)]
+          result (lt/lookup-dual-axis table 80 1087)]
       (is (some? result) "Found interpolated result")
       (is (some? (:tilt result)) "Has tilt")
       (is (some? (:panel-azimuth result)) "Has panel-azimuth"))))

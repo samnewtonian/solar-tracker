@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Solar angle calculation library for computing optimal solar panel angles based on date, time, and geographic position. Supports fixed installations, single-axis trackers, and dual-axis trackers. Implemented in Clojure, Python, and Rust with numerically identical results.
+Solar angle calculation library for computing optimal solar panel angles based on date, time, and geographic position. Supports fixed installations, single-axis trackers, and dual-axis trackers. Implemented in Clojure (reference), Python, and Rust.
 
 ## Project Structure
 
@@ -17,8 +17,9 @@ clojure/                          # Clojure implementation
     lookup_table.clj              # Precomputed lookup tables
     lookup_table/spec.clj         # Specs for lookup table config & structures
   test/com/kardashevtypev/solar/
-    angles_test.clj               # Angles test suite (42 tests / 11k+ assertions)
+    angles_test.clj               # Angles test suite (42 tests / 10k+ assertions)
     lookup_table_test.clj         # Lookup table test suite
+    test_util.clj                 # Shared test helpers (approx=)
 
 python/                           # Python implementation (package: solar_tracker)
   pyproject.toml                  # Hatchling build, requires Python >=3.11
@@ -49,25 +50,30 @@ doc/                              # Implementation notes
 
 ## Implementation Notes
 
-### Clojure (`clojure/`)
+### Clojure (`clojure/`) — reference implementation
 
 - Package: `com.kardashevtypev.solar.{angles,lookup-table}`
+- **`solar-position` takes `[latitude longitude ZonedDateTime]`** — accepts any timezone-aware datetime, converts to UTC internally via `.withZoneSameInstant`
+- No `std-meridian` parameter or `local-solar-time` function; UTC-based calculation uses `utc-lst-correction` (longitude + EoT) computed once per day
+- Public helpers: `leap-year?`, `days-in-months`, `utc-lst-correction`, `solar-angles-at`
 - Keyword maps for return types (`:zenith`, `:altitude`, `:azimuth`, etc.)
 - Clojure specs for input/output validation
 - Run tests: `cd clojure && clj -X:test`
 
-### Python (`python/`)
+### Python (`python/`) — not yet updated to new API
 
 - Package: `solar_tracker`
+- **Still uses old 8-arg `solar_position(lat, lon, year, month, day, hour, minute, std_meridian)` with `local_solar_time`** — pending port of Clojure ZonedDateTime changes
 - Frozen dataclasses for return types (`SolarPosition`, `DualAxisAngles`, etc.)
 - `Season` is a `StrEnum` (`"summer"`, `"winter"`, `"spring"`, `"fall"`)
 - Type hints on all public functions; no runtime validation module
 - No external dependencies (stdlib only); `pytest` is a dev dependency
 - Run tests: `cd python && python -m pytest`
 
-### Rust (`rust/`)
+### Rust (`rust/`) — not yet updated to new API
 
 - Crate: `solar_tracker`
+- **Still uses old 8-arg `solar_position(lat, lon, year, month, day, hour, minute, std_meridian)` with `local_solar_time`** — pending port of Clojure ZonedDateTime changes
 - Structs with derives for return types (`SolarPosition`, `DualAxisAngles`, etc.)
 - `Season` is an enum with variants `Summer`, `Winter`, `Spring`, `Fall`
 - Generic `LookupTable<E>` and `DayData<E>` with type aliases `SingleAxisTable` / `DualAxisTable`
@@ -77,18 +83,20 @@ doc/                              # Implementation notes
 
 ## Architecture
 
-**Calculation pipeline:** day-of-year → intermediate angle B → equation of time → local solar time → hour angle + declination → zenith/azimuth → panel angles
+**Calculation pipeline (Clojure — reference):** ZonedDateTime → UTC conversion → day-of-year → equation of time + declination → `utc-lst-correction` (constant per day) → local solar time → hour angle → zenith/azimuth → panel angles
+
+**Calculation pipeline (Python/Rust — old API):** local time + std_meridian → local solar time → hour angle + declination → zenith/azimuth → panel angles
 
 **Module structure (all implementations):**
 - `angles` — Core solar position and panel angle functions. Entry point is `solar_position` / `solar-position` which returns all computed angles.
-- `lookup_table` / `lookup-table` — Precomputed angle tables indexed by `[day-of-year][interval]`. Depends on `angles`.
+- `lookup_table` / `lookup-table` — Precomputed angle tables indexed by `[day-of-year][UTC-minutes]`. Depends on `angles`. Separate generation for single-axis and dual-axis. Precomputes sin/cos of latitude (once) and declination (per day) for table generation.
 
 **Conventions (shared across all implementations):**
 - Angles in degrees (radians only internally for trig)
 - Latitude positive = North, longitude negative = West
 - Azimuth: 0° = North, 90° = East, 180° = South, 270° = West
 - Hour angle: negative = morning, positive = afternoon, 0° = solar noon
-- Default reference location: Springfield, IL (39.8°N, 89.6°W, std meridian -90°)
+- Default reference location: Springfield, IL (39.8°N, 89.6°W)
 
 ## Design Documents
 

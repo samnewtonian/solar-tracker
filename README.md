@@ -2,7 +2,9 @@
 
 Solar angle calculation library for computing optimal solar panel angles based on date, time, and geographic position. Supports fixed installations, single-axis trackers, and dual-axis trackers.
 
-Implemented in Clojure, Python, and Rust with numerically identical results. Uses standard solar position algorithms (NOAA / Duffie & Beckman).
+Implemented in Clojure (reference implementation), Python, and Rust. Uses standard solar position algorithms (NOAA / Duffie & Beckman).
+
+> **API divergence:** The Clojure implementation has been updated to accept a timezone-aware `ZonedDateTime` instead of raw date/time args + `std_meridian`. The Python and Rust ports still use the old 8-argument `solar_position` signature and will be updated to match.
 
 ## Features
 
@@ -22,7 +24,7 @@ Implemented in Clojure, Python, and Rust with numerically identical results. Use
 
 ## Usage
 
-### Clojure
+### Clojure (reference implementation)
 
 Add as a git dependency in your `deps.edn` (use `:deps/root` since the Clojure source lives under `clojure/`):
 
@@ -38,10 +40,12 @@ Then in your code:
 
 ```clojure
 (require '[com.kardashevtypev.solar.angles :as sa])
+(import '[java.time ZonedDateTime ZoneId])
 
-;; Calculate solar position for Springfield, IL on March 21 at noon
-;; (39.8°N, 89.6°W, Central Time std meridian -90°)
-(sa/solar-position 39.8 -89.6 2026 3 21 12 0 -90.0)
+;; Calculate solar position for Springfield, IL on March 21 at noon Central Time
+;; Pass any timezone-aware ZonedDateTime — converted to UTC internally
+(sa/solar-position 39.8 -89.6
+                   (ZonedDateTime/of 2026 3 21 12 0 0 0 (ZoneId/of "America/Chicago")))
 ;; => {:day-of-year 80
 ;;     :declination -0.40
 ;;     :equation-of-time -7.86
@@ -52,11 +56,13 @@ Then in your code:
 ;;     :azimuth 176.34}
 
 ;; Dual-axis tracker angles
-(sa/dual-axis-angles (sa/solar-position 39.8 -89.6 2026 6 21 14 30 -90.0))
+(let [dt (ZonedDateTime/of 2026 6 21 14 30 0 0 (ZoneId/of "America/Chicago"))]
+  (sa/dual-axis-angles (sa/solar-position 39.8 -89.6 dt)))
 ;; => {:tilt <zenith>, :panel-azimuth <facing-sun>}
 
 ;; Single-axis tracker rotation
-(let [pos (sa/solar-position 39.8 -89.6 2026 3 21 15 0 -90.0)]
+(let [dt (ZonedDateTime/of 2026 3 21 15 0 0 0 (ZoneId/of "America/Chicago"))
+      pos (sa/solar-position 39.8 -89.6 dt)]
   (sa/single-axis-tilt pos 39.8))
 
 ;; Optimal fixed tilt for a latitude
@@ -67,13 +73,14 @@ Then in your code:
 (sa/seasonal-tilt-adjustment 40.0 :winter)  ;; => 55.0°
 ```
 
-### Python
+### Python (old API — pending update)
 
 ```python
 from solar_tracker import solar_position, dual_axis_angles, single_axis_tilt
 from solar_tracker import optimal_fixed_tilt, seasonal_tilt_adjustment, Season
 
-# Calculate solar position for Springfield, IL on March 21 at noon
+# NOTE: Python still uses the old 8-arg API with std_meridian.
+# Pass local standard time (not DST) and the standard meridian for your timezone.
 pos = solar_position(39.8, -89.6, 2026, 3, 21, 12, 0, -90.0)
 # SolarPosition(day_of_year=80, declination=-0.40, equation_of_time=-7.86,
 #   local_solar_time=11.84, hour_angle=-2.36, zenith=40.26,
@@ -95,7 +102,7 @@ seasonal_tilt_adjustment(40.0, Season.SUMMER)  # => 25.0°
 seasonal_tilt_adjustment(40.0, Season.WINTER)  # => 55.0°
 ```
 
-### Rust
+### Rust (old API — pending update)
 
 Add as a dependency in your `Cargo.toml`:
 
@@ -109,7 +116,8 @@ Then in your code:
 ```rust
 use solar_tracker::*;
 
-// Calculate solar position for Springfield, IL on March 21 at noon
+// NOTE: Rust still uses the old 8-arg API with std_meridian.
+// Pass local standard time (not DST) and the standard meridian for your timezone.
 let pos = solar_position(39.8, -89.6, 2026, 3, 21, 12, 0, -90.0);
 // pos.zenith ≈ 40.26, pos.altitude ≈ 49.74, pos.azimuth ≈ 176.34
 
@@ -131,21 +139,35 @@ seasonal_tilt_adjustment(40.0, Season::Winter); // => 55.0°
 
 ## API Reference
 
-All implementations expose the same functions with identical signatures (modulo language naming conventions). The tables below use the Python names; Clojure equivalents use kebab-case (e.g. `solar_position` → `solar-position`); Rust uses snake_case with references (e.g. `dual_axis_angles(&pos)`).
+The Clojure implementation is the reference. Python and Rust naming follows language conventions (snake_case, `&` references in Rust). Clojure uses kebab-case (e.g. `solar-position`).
 
 ### Core Solar Position (`angles`)
 
+**Clojure (reference — new API):**
+
 | Function | Description |
 |----------|-------------|
-| `solar_position(lat, lon, year, month, day, hour, minute, std_meridian)` | Full solar position; returns all computed angles |
-| `day_of_year(year, month, day)` | Calendar date to day number (1-366) |
-| `solar_declination(n)` | Declination angle for day of year |
-| `equation_of_time(n)` | Equation of time correction in minutes |
+| `solar-position(lat, lon, ZonedDateTime)` | Full solar position; converts to UTC internally |
+| `solar-angles-at(lat, decl, correction, utc-hours)` | Angles from precomputed day-constants and UTC time |
+| `utc-lst-correction(longitude, eot)` | UTC→LST correction in hours (constant per day) |
+| `leap-year?(year)` | Leap year predicate |
+| `days-in-months(year)` | Vector of days per month for a given year |
+| `day-of-year(year, month, day)` | Calendar date to ordinal day number (1-366) |
+| `solar-declination(n)` | Declination angle for day of year |
+| `equation-of-time(n)` | Equation of time correction in minutes |
+| `hour-angle(local-solar-time)` | Hour angle from local solar time |
+| `solar-zenith-angle(lat, decl, hour-angle)` | Zenith angle |
+| `solar-altitude(zenith)` | Altitude (complement of zenith) |
+| `solar-azimuth(lat, decl, hour-angle)` | Azimuth (0°=N, 90°=E, 180°=S) |
+
+**Python / Rust (old API — pending update):**
+
+| Function | Description |
+|----------|-------------|
+| `solar_position(lat, lon, year, month, day, hour, minute, std_meridian)` | Full solar position; takes local standard time + std meridian |
 | `local_solar_time(local_time, std_meridian, longitude, n)` | Clock time to true solar time |
-| `hour_angle(local_solar_time)` | Hour angle from local solar time |
-| `solar_zenith_angle(lat, decl, hour_angle)` | Zenith angle |
-| `solar_altitude(zenith)` | Altitude (complement of zenith) |
-| `solar_azimuth(lat, decl, hour_angle)` | Azimuth (0°=N, 90°=E, 180°=S) |
+| `day_of_year(year, month, day)` | Calendar date to day number (1-366) |
+| *(remaining functions identical to Clojure)* | |
 
 ### Panel Angles (`angles`)
 

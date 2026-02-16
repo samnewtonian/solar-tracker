@@ -1,7 +1,8 @@
 (ns com.kardashevtypev.solar.angles
   "Solar panel angle calculations for single and dual-axis tracking systems.
    All angles in degrees unless otherwise noted."
-  (:require [clojure.math :as math]))
+  (:require [clojure.math :as math])
+  (:import [java.time ZonedDateTime ZoneOffset]))
 
 ;;; ============================================================
 ;;; Constants and Conversion Utilities
@@ -9,16 +10,18 @@
 
 (def ^:const earth-axial-tilt 23.45)
 (def ^:const degrees-per-hour 15.0)
+(def ^:const deg->rad-factor (/ math/PI 180.0))
+(def ^:const rad->deg-factor (/ 180.0 math/PI))
 
 (defn deg->rad
   "Convert degrees to radians."
   [deg]
-  (* deg (/ math/PI 180.0)))
+  (* deg deg->rad-factor))
 
 (defn rad->deg
   "Convert radians to degrees."
   [rad]
-  (* rad (/ 180.0 math/PI)))
+  (* rad rad->deg-factor))
 
 (defn normalize-angle
   "Normalize angle to 0-360 degree range."
@@ -29,15 +32,22 @@
 ;;; Date Utilities
 ;;; ============================================================
 
+(defn leap-year?
+  "Returns true if year is a leap year."
+  [year]
+  (or (zero? (mod year 400))
+      (and (zero? (mod year 4))
+           (not (zero? (mod year 100))))))
+
+(defn days-in-months
+  "Returns a vector of days per month for the given year."
+  [year]
+  [31 (if (leap-year? year) 29 28) 31 30 31 30 31 31 30 31 30 31])
+
 (defn day-of-year
-  "Calculate day of year (1-366) from year, month, day.
-   Uses the standard algorithm accounting for leap years."
+  "Calculate day of year (1-366) from year, month, day."
   [year month day]
-  (let [leap? (or (zero? (mod year 400))
-                  (and (zero? (mod year 4))
-                       (not (zero? (mod year 100)))))
-        days-in-months [31 (if leap? 29 28) 31 30 31 30 31 31 30 31 30 31]
-        days-before-month (reduce + (take (dec month) days-in-months))]
+  (let [days-before-month (reduce + (take (dec month) (days-in-months year)))]
     (+ days-before-month day)))
 
 ;;; ============================================================
@@ -66,22 +76,6 @@
           (* -0.032077 (math/sin b))
           (* -0.014615 (math/cos (* 2 b)))
           (* -0.040849 (math/sin (* 2 b)))))))
-
-(defn local-solar-time
-  "Calculate Local Solar Time from clock time.
-   Inputs:
-     local-time     - Clock time in decimal hours (e.g., 14.5 for 2:30 PM)
-     std-meridian   - Standard meridian for time zone (degrees, negative for West)
-     local-longitude - Observer's longitude (degrees, negative for West)
-     n              - Day number (1-365)
-   Output: Local solar time in decimal hours"
-  [local-time std-meridian local-longitude n]
-  (let [eot (equation-of-time n)
-        ;; Longitude correction: 4 minutes per degree difference
-        long-correction (/ (* 4.0 (- std-meridian local-longitude)) 60.0)
-        ;; Equation of time correction (convert from minutes to hours)
-        eot-correction (/ eot 60.0)]
-    (+ local-time long-correction eot-correction)))
 
 (defn hour-angle
   "Calculate the hour angle from local solar time.
@@ -161,25 +155,48 @@
     ;; Convert to degrees and normalize to [0, 360)
     (normalize-angle (rad->deg az-rad))))
 
+(defn utc-lst-correction
+  "Compute the UTC→LST correction in hours for a given longitude and equation of time.
+   LST = mod(utc-hours + correction, 24)."
+  [longitude eot]
+  (/ (+ (* 4.0 longitude) eot) 60.0))
+
+(defn solar-angles-at
+  "Compute solar angles from precomputed day-constants and UTC time.
+   Returns {:local-solar-time :hour-angle :zenith :altitude :azimuth}.
+
+   Inputs:
+     latitude   - Observer's latitude in degrees
+     decl       - Solar declination in degrees
+     correction - UTC→LST correction in hours (from utc-lst-correction)
+     utc-hours  - UTC time in decimal hours"
+  [latitude decl correction utc-hours]
+  (let [lst    (mod (+ utc-hours correction) 24.0)
+        ha     (hour-angle lst)
+        zenith (solar-zenith-angle latitude decl ha)
+        alt    (solar-altitude zenith)
+        azim   (solar-azimuth latitude decl ha)]
+    {:local-solar-time lst
+     :hour-angle ha
+     :zenith zenith
+     :altitude alt
+     :azimuth azim}))
+
 ;;; ============================================================
 ;;; High-Level Solar Position Function
 ;;; ============================================================
 
 (defn solar-position
-  "Calculate complete solar position for given location, date, and time.
+  "Calculate complete solar position for given location and timezone-aware datetime.
 
    Inputs:
-     latitude        - Observer's latitude (degrees, positive = North)
-     longitude       - Observer's longitude (degrees, negative = West)
-     year            - Calendar year
-     month           - Month (1-12)
-     day             - Day of month (1-31)
-     hour            - Hour in 24-hour format (0-23)
-     minute          - Minute (0-59)
-     std-meridian    - Standard meridian for time zone (degrees)
+     latitude  - Observer's latitude (degrees, positive = North)
+     longitude - Observer's longitude (degrees, negative = West)
+     datetime  - A java.time.ZonedDateTime with timezone info.
+                 Internally converted to UTC via .withZoneSameInstant.
 
    Returns a map containing:
-     :day-of-year    - Julian day number
+     :day-of-year    - Ordinal day of year in UTC (1-366)
      :declination    - Solar declination (degrees)
      :equation-of-time - Equation of time correction (minutes)
      :local-solar-time - True solar time (decimal hours)
@@ -187,24 +204,23 @@
      :zenith         - Solar zenith angle (degrees)
      :altitude       - Solar altitude/elevation (degrees)
      :azimuth        - Solar azimuth (degrees, 0° = North)"
-  [latitude longitude year month day hour minute std-meridian]
-  (let [n (day-of-year year month day)
-        local-time (+ hour (/ minute 60.0))
-        eot (equation-of-time n)
-        lst (local-solar-time local-time std-meridian longitude n)
-        ha (hour-angle lst)
-        decl (solar-declination n)
-        zenith (solar-zenith-angle latitude decl ha)
-        alt (solar-altitude zenith)
-        azim (solar-azimuth latitude decl ha)]
-    {:day-of-year n
-     :declination decl
-     :equation-of-time eot
-     :local-solar-time lst
-     :hour-angle ha
-     :zenith zenith
-     :altitude alt
-     :azimuth azim}))
+  [latitude longitude datetime]
+  (let [utc        (.withZoneSameInstant datetime ZoneOffset/UTC)
+        year       (.getYear utc)
+        month      (.getMonthValue utc)
+        day-of-mon (.getDayOfMonth utc)
+        utc-hours  (+ (.getHour utc)
+                      (/ (.getMinute utc) 60.0)
+                      (/ (.getSecond utc) 3600.0))
+        n          (day-of-year year month day-of-mon)
+        eot        (equation-of-time n)
+        decl       (solar-declination n)
+        correction (utc-lst-correction longitude eot)
+        angles     (solar-angles-at latitude decl correction utc-hours)]
+    (merge {:day-of-year n
+            :declination decl
+            :equation-of-time eot}
+           angles)))
 
 ;;; ============================================================
 ;;; Panel Angle Calculations
@@ -269,24 +285,17 @@
 (defn example-calculation
   "Demonstrate calculations for Springfield, IL on March 21 at solar noon.
    Springfield, IL: 39.8°N, 89.6°W
-   Central Time Zone standard meridian: -90°"
+   Central Time Zone: America/Chicago (UTC-6)"
   []
   (let [;; Location: Springfield, IL
         latitude 39.8
         longitude -89.6
-        std-meridian -90.0
 
-        ;; Date: March 21 (Spring Equinox)
-        year 2026
-        month 3
-        day 21
-
-        ;; Time: approximately solar noon (accounting for longitude offset)
-        hour 12
-        minute 0
+        ;; Date/time: March 21 noon Central Time
+        datetime (ZonedDateTime/of 2026 3 21 12 0 0 0 (java.time.ZoneId/of "America/Chicago"))
 
         ;; Calculate solar position
-        pos (solar-position latitude longitude year month day hour minute std-meridian)
+        pos (solar-position latitude longitude datetime)
 
         ;; Calculate panel angles
         single-axis (single-axis-tilt pos latitude)
@@ -295,8 +304,7 @@
 
     (println "=== Solar Position Calculation Example ===")
     (println (format "Location: Springfield, IL (%.1f°N, %.1f°W)" latitude (- longitude)))
-    (println (format "Date: %d-%02d-%02d" year month day))
-    (println (format "Time: %02d:%02d local time" hour minute))
+    (println (format "Datetime: %s" datetime))
     (println)
     (println "--- Solar Position ---")
     (println (format "Day of year: %d" (:day-of-year pos)))
@@ -326,14 +334,20 @@
   (example-calculation)
 
   ;; Calculate position for a specific time
-  (solar-position 39.8 -89.6 2026 6 21 14 30 -90.0)
+  (solar-position 39.8 -89.6
+                  (ZonedDateTime/of 2026 6 21 14 30 0 0
+                                    (java.time.ZoneId/of "America/Chicago")))
 
   ;; Get dual-axis angles
-  (-> (solar-position 39.8 -89.6 2026 6 21 14 30 -90.0)
+  (-> (solar-position 39.8 -89.6
+                      (ZonedDateTime/of 2026 6 21 14 30 0 0
+                                        (java.time.ZoneId/of "America/Chicago")))
       (dual-axis-angles))
 
   ;; Calculate for summer solstice at noon
-  (let [pos (solar-position 39.8 -89.6 2026 6 21 12 0 -90.0)]
+  (let [pos (solar-position 39.8 -89.6
+                            (ZonedDateTime/of 2026 6 21 12 0 0 0
+                                              (java.time.ZoneId/of "America/Chicago")))]
     {:zenith (:zenith pos)
      :summer-tilt (seasonal-tilt-adjustment 39.8 :summer)})
   )

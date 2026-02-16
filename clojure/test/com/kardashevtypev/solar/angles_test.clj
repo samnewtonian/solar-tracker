@@ -2,16 +2,17 @@
   (:require [clojure.test :refer [deftest is testing]]
             [clojure.spec.test.alpha :as stest]
             [com.kardashevtypev.solar.angles :as a]
-            [com.kardashevtypev.solar.angles.spec]))
+            [com.kardashevtypev.solar.angles.spec]
+            [com.kardashevtypev.solar.test-util :refer [approx=]])
+  (:import [java.time ZonedDateTime ZoneOffset]))
 
 ;; Enable spec instrumentation for tests
 (stest/instrument)
 
-(defn approx=
-  "Test if two numbers are approximately equal within tolerance."
-  ([a b] (approx= a b 0.1))
-  ([a b tolerance]
-   (< (abs (- a b)) tolerance)))
+(defn- zdt
+  "Construct a ZonedDateTime from year, month, day, hour, minute, and UTC offset hours."
+  [yr mo dy hr mn offset-hours]
+  (ZonedDateTime/of yr mo dy hr mn 0 0 (ZoneOffset/ofHours offset-hours)))
 
 (deftest day-of-year-test
   (testing "Day of year calculation"
@@ -60,7 +61,7 @@
 (deftest solar-position-springfield-equinox-test
   (testing "Solar position for Springfield, IL at spring equinox solar noon"
     ;; This is the worked example from the architecture docs
-    (let [pos (a/solar-position 39.8 -89.6 2026 3 21 12 0 -90.0)]
+    (let [pos (a/solar-position 39.8 -89.6 (zdt 2026 3 21 12 0 -6))]
 
       (is (= 80 (:day-of-year pos)) "Day of year")
 
@@ -81,7 +82,7 @@
 
 (deftest solar-position-summer-solstice-test
   (testing "Solar position at summer solstice"
-    (let [pos (a/solar-position 39.8 -89.6 2026 6 21 12 0 -90.0)]
+    (let [pos (a/solar-position 39.8 -89.6 (zdt 2026 6 21 12 0 -6))]
 
       (is (approx= 23.45 (:declination pos) 1.0)
           "Declination near +23.45° at summer solstice")
@@ -95,7 +96,7 @@
 
 (deftest solar-position-winter-solstice-test
   (testing "Solar position at winter solstice"
-    (let [pos (a/solar-position 39.8 -89.6 2026 12 21 12 0 -90.0)]
+    (let [pos (a/solar-position 39.8 -89.6 (zdt 2026 12 21 12 0 -6))]
 
       (is (approx= -23.45 (:declination pos) 1.0)
           "Declination near -23.45° at winter solstice")
@@ -110,25 +111,25 @@
 (deftest single-axis-tilt-test
   (testing "Single-axis tracker rotation"
     ;; At solar noon, hour angle should be near 0°, so rotation should be near 0°
-    (let [pos-noon (a/solar-position 39.8 -89.6 2026 3 21 12 0 -90.0)
+    (let [pos-noon (a/solar-position 39.8 -89.6 (zdt 2026 3 21 12 0 -6))
           tilt-noon (a/single-axis-tilt pos-noon 39.8)]
       (is (approx= 0.0 tilt-noon 5.0)
           "Near-zero rotation at solar noon"))
 
     ;; Morning/afternoon should have non-zero rotation
-    (let [pos-morning (a/solar-position 39.8 -89.6 2026 3 21 9 0 -90.0)
+    (let [pos-morning (a/solar-position 39.8 -89.6 (zdt 2026 3 21 9 0 -6))
           tilt-morning (a/single-axis-tilt pos-morning 39.8)]
       (is (< tilt-morning 0.0)
           "Negative rotation in morning (tilted east)"))
 
-    (let [pos-afternoon (a/solar-position 39.8 -89.6 2026 3 21 15 0 -90.0)
+    (let [pos-afternoon (a/solar-position 39.8 -89.6 (zdt 2026 3 21 15 0 -6))
           tilt-afternoon (a/single-axis-tilt pos-afternoon 39.8)]
       (is (> tilt-afternoon 0.0)
           "Positive rotation in afternoon (tilted west)"))))
 
 (deftest dual-axis-angles-test
   (testing "Dual-axis tracker angles"
-    (let [pos (a/solar-position 39.8 -89.6 2026 3 21 12 0 -90.0)
+    (let [pos (a/solar-position 39.8 -89.6 (zdt 2026 3 21 12 0 -6))
           {:keys [tilt panel-azimuth]} (a/dual-axis-angles pos)]
 
       (is (approx= (:zenith pos) tilt 0.01)
@@ -245,8 +246,8 @@
 (deftest equator-solar-noon-equinox-test
   (testing "Sun directly overhead at equator on equinox at solar noon"
     ;; At the equator (0°N) on the equinox, the sun should be nearly overhead
-    ;; at solar noon. Using longitude 0° with std-meridian 0° for simplicity.
-    (let [pos (a/solar-position 0.0 0.0 2026 3 21 12 0 0.0)]
+    ;; at solar noon. Using longitude 0° with UTC for simplicity.
+    (let [pos (a/solar-position 0.0 0.0 (zdt 2026 3 21 12 0 0))]
       (is (approx= 0.0 (:declination pos) 1.0)
           "Declination near 0° at equinox")
       (is (< (:zenith pos) 5.0)
@@ -257,7 +258,7 @@
 (deftest polar-latitude-test
   (testing "High-latitude behaviour near summer solstice"
     ;; At 70°N on summer solstice around noon, sun should be above horizon
-    (let [pos (a/solar-position 70.0 15.0 2026 6 21 12 0 15.0)]
+    (let [pos (a/solar-position 70.0 15.0 (zdt 2026 6 21 12 0 1))]
       (is (> (:altitude pos) 0.0)
           "Sun above horizon at 70°N on summer solstice")
       (is (< (:zenith pos) 90.0)
@@ -265,15 +266,15 @@
 
   (testing "High-latitude behaviour near winter solstice"
     ;; At 70°N on winter solstice around noon, sun should be very low or below horizon
-    (let [pos (a/solar-position 70.0 15.0 2026 12 21 12 0 15.0)]
+    (let [pos (a/solar-position 70.0 15.0 (zdt 2026 12 21 12 0 1))]
       (is (> (:zenith pos) 85.0)
           "Zenith very high at 70°N winter solstice (sun barely rises)"))))
 
 (deftest southern-hemisphere-test
   (testing "Southern hemisphere seasons are reversed"
-    ;; Sydney, Australia: 33.9°S, 151.2°E, std meridian 150°
-    (let [pos-jun (a/solar-position -33.9 151.2 2026 6 21 12 0 150.0)
-          pos-dec (a/solar-position -33.9 151.2 2026 12 21 12 0 150.0)]
+    ;; Sydney, Australia: 33.9°S, 151.2°E, UTC+10
+    (let [pos-jun (a/solar-position -33.9 151.2 (zdt 2026 6 21 12 0 10))
+          pos-dec (a/solar-position -33.9 151.2 (zdt 2026 12 21 12 0 10))]
       ;; June = winter in south, December = summer in south
       (is (> (:zenith pos-jun) (:zenith pos-dec))
           "Sun lower in June (winter) than December (summer) in southern hemisphere")
@@ -283,7 +284,7 @@
 (deftest midnight-position-test
   (testing "Sun below horizon at midnight"
     ;; Springfield at midnight on equinox
-    (let [pos (a/solar-position 39.8 -89.6 2026 3 21 0 0 -90.0)]
+    (let [pos (a/solar-position 39.8 -89.6 (zdt 2026 3 21 0 0 -6))]
       (is (< (:altitude pos) 0.0) "Sun below horizon at midnight")
       (is (> (:zenith pos) 90.0) "Zenith > 90° when sun is below horizon"))))
 
@@ -293,27 +294,27 @@
 
 (deftest zenith-altitude-complement-test
   (testing "Zenith + altitude = 90 for various inputs"
-    (doseq [[lat lon yr mo dy hr mn std]
-            [[39.8 -89.6 2026 3 21 12 0 -90.0]
-             [0.0 0.0 2026 6 21 12 0 0.0]
-             [-33.9 151.2 2026 12 21 15 30 150.0]
-             [51.5 -0.1 2026 9 22 8 0 0.0]
-             [70.0 25.0 2026 6 21 18 0 30.0]]]
-      (let [pos (a/solar-position lat lon yr mo dy hr mn std)]
+    (doseq [[lat lon yr mo dy hr mn offset]
+            [[39.8 -89.6 2026 3 21 12 0 -6]
+             [0.0 0.0 2026 6 21 12 0 0]
+             [-33.9 151.2 2026 12 21 15 30 10]
+             [51.5 -0.1 2026 9 22 8 0 0]
+             [70.0 25.0 2026 6 21 18 0 2]]]
+      (let [pos (a/solar-position lat lon (zdt yr mo dy hr mn offset))]
         (is (approx= 90.0 (+ (:zenith pos) (:altitude pos)) 1e-10)
             (str "zenith + altitude = 90 for lat=" lat " lon=" lon))))))
 
 (deftest azimuth-always-normalized-test
   (testing "Azimuth always in [0, 360) for various locations and times"
-    (doseq [[lat lon yr mo dy hr mn std]
-            [[39.8 -89.6 2026 1 15 8 0 -90.0]
-             [39.8 -89.6 2026 1 15 16 0 -90.0]
-             [39.8 -89.6 2026 7 15 6 0 -90.0]
-             [39.8 -89.6 2026 7 15 20 0 -90.0]
-             [-45.0 170.0 2026 3 21 12 0 180.0]
-             [60.0 10.0 2026 6 21 3 0 15.0]
-             [0.0 0.0 2026 9 22 12 0 0.0]]]
-      (let [pos (a/solar-position lat lon yr mo dy hr mn std)]
+    (doseq [[lat lon yr mo dy hr mn offset]
+            [[39.8 -89.6 2026 1 15 8 0 -6]
+             [39.8 -89.6 2026 1 15 16 0 -6]
+             [39.8 -89.6 2026 7 15 6 0 -6]
+             [39.8 -89.6 2026 7 15 20 0 -6]
+             [-45.0 170.0 2026 3 21 12 0 12]
+             [60.0 10.0 2026 6 21 3 0 1]
+             [0.0 0.0 2026 9 22 12 0 0]]]
+      (let [pos (a/solar-position lat lon (zdt yr mo dy hr mn offset))]
         (is (<= 0.0 (:azimuth pos)) (str "Azimuth >= 0 for " [lat lon hr]))
         (is (< (:azimuth pos) 360.0) (str "Azimuth < 360 for " [lat lon hr]))))))
 
@@ -357,12 +358,12 @@
 (deftest multiple-cities-noon-equinox-test
   (testing "Solar position at noon on equinox for various cities"
     ;; At solar noon on equinox, zenith should approximately equal |latitude|
-    (let [cities [{:name "London" :lat 51.5 :lon -0.1 :std 0.0}
-                  {:name "Tokyo" :lat 35.7 :lon 139.7 :std 135.0}
-                  {:name "Cape Town" :lat -33.9 :lon 18.4 :std 30.0}
-                  {:name "Quito" :lat -0.2 :lon -78.5 :std -75.0}]]
-      (doseq [{:keys [name lat lon std]} cities]
-        (let [pos (a/solar-position lat lon 2026 3 21 12 0 std)]
+    (let [cities [{:name "London" :lat 51.5 :lon -0.1 :offset 0}
+                  {:name "Tokyo" :lat 35.7 :lon 139.7 :offset 9}
+                  {:name "Cape Town" :lat -33.9 :lon 18.4 :offset 2}
+                  {:name "Quito" :lat -0.2 :lon -78.5 :offset -5}]]
+      (doseq [{:keys [name lat lon offset]} cities]
+        (let [pos (a/solar-position lat lon (zdt 2026 3 21 12 0 offset))]
           ;; zenith ≈ |latitude| at equinox noon (within a few degrees due to
           ;; EoT and longitude offset from std meridian)
           (is (approx= (abs lat) (:zenith pos) 8.0)
@@ -372,8 +373,8 @@
   (testing "Morning and afternoon positions are roughly symmetric around noon"
     ;; At equinox, 3 hours before and after solar noon should give
     ;; similar zenith but mirrored azimuth
-    (let [pos-9am (a/solar-position 39.8 -89.6 2026 3 21 9 0 -90.0)
-          pos-3pm (a/solar-position 39.8 -89.6 2026 3 21 15 0 -90.0)]
+    (let [pos-9am (a/solar-position 39.8 -89.6 (zdt 2026 3 21 9 0 -6))
+          pos-3pm (a/solar-position 39.8 -89.6 (zdt 2026 3 21 15 0 -6))]
       (is (approx= (:zenith pos-9am) (:zenith pos-3pm) 5.0)
           "Zenith roughly symmetric 3h before/after noon")
       ;; Azimuth should be roughly mirrored around 180° (south)
