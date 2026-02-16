@@ -159,7 +159,7 @@
   "Compute the UTC→LST correction in hours for a given longitude and equation of time.
    LST = mod(utc-hours + correction, 24)."
   [longitude eot]
-  (+ (/ (* 4.0 longitude) 60.0) (/ eot 60.0)))
+  (/ (+ (* 4.0 longitude) eot) 60.0))
 
 (defn solar-angles-at
   "Compute solar angles from precomputed day-constants and UTC time.
