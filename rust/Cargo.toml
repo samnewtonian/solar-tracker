@@ -1,0 +1,8 @@
+[package]
+name = "solar_tracker"
+version = "0.1.0"
+edition = "2021"
+description = "Solar angle calculation library for solar panel tracking systems"
+license = "Apache-2.0"
+
+[dependencies]

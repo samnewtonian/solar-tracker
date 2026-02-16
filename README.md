@@ -2,7 +2,7 @@
 
 Solar angle calculation library for computing optimal solar panel angles based on date, time, and geographic position. Supports fixed installations, single-axis trackers, and dual-axis trackers.
 
-Implemented in Clojure and Python with numerically identical results. Uses standard solar position algorithms (NOAA / Duffie & Beckman).
+Implemented in Clojure, Python, and Rust with numerically identical results. Uses standard solar position algorithms (NOAA / Duffie & Beckman).
 
 ## Features
 
@@ -17,6 +17,8 @@ Implemented in Clojure and Python with numerically identical results. Uses stand
 **Clojure:** Clojure 1.12+, Java 11+
 
 **Python:** Python 3.11+ (no external dependencies; pytest for dev)
+
+**Rust:** Rust 1.80+ (no external dependencies; std only)
 
 ## Usage
 
@@ -93,9 +95,43 @@ seasonal_tilt_adjustment(40.0, Season.SUMMER)  # => 25.0°
 seasonal_tilt_adjustment(40.0, Season.WINTER)  # => 55.0°
 ```
 
+### Rust
+
+Add as a dependency in your `Cargo.toml`:
+
+```toml
+[dependencies]
+solar_tracker = { git = "https://github.com/samnewtonian/solar-tracker", subdirectory = "rust" }
+```
+
+Then in your code:
+
+```rust
+use solar_tracker::*;
+
+// Calculate solar position for Springfield, IL on March 21 at noon
+let pos = solar_position(39.8, -89.6, 2026, 3, 21, 12, 0, -90.0);
+// pos.zenith ≈ 40.26, pos.altitude ≈ 49.74, pos.azimuth ≈ 176.34
+
+// Dual-axis tracker angles
+let da = dual_axis_angles(&pos);
+// da.tilt, da.panel_azimuth
+
+// Single-axis tracker rotation
+let pos = solar_position(39.8, -89.6, 2026, 3, 21, 15, 0, -90.0);
+let rotation = single_axis_tilt(&pos, 39.8);
+
+// Optimal fixed tilt for a latitude
+optimal_fixed_tilt(39.8); // => 33.3°
+
+// Seasonal tilt adjustments
+seasonal_tilt_adjustment(40.0, Season::Summer); // => 25.0°
+seasonal_tilt_adjustment(40.0, Season::Winter); // => 55.0°
+```
+
 ## API Reference
 
-Both implementations expose the same functions with identical signatures (modulo language naming conventions). The tables below use the Python names; Clojure equivalents use kebab-case (e.g. `solar_position` → `solar-position`).
+All implementations expose the same functions with identical signatures (modulo language naming conventions). The tables below use the Python names; Clojure equivalents use kebab-case (e.g. `solar_position` → `solar-position`); Rust uses snake_case with references (e.g. `dual_axis_angles(&pos)`).
 
 ### Core Solar Position (`angles`)
 
@@ -152,6 +188,9 @@ cd clojure && clj -X:test
 
 # Python
 cd python && python -m pytest
+
+# Rust
+cd rust && cargo test
 ```
 
 ## References

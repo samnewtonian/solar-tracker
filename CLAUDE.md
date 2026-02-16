@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Solar angle calculation library for computing optimal solar panel angles based on date, time, and geographic position. Supports fixed installations, single-axis trackers, and dual-axis trackers. Implemented in both Clojure and Python with numerically identical results.
+Solar angle calculation library for computing optimal solar panel angles based on date, time, and geographic position. Supports fixed installations, single-axis trackers, and dual-axis trackers. Implemented in Clojure, Python, and Rust with numerically identical results.
 
 ## Project Structure
 
@@ -32,6 +32,17 @@ python/                           # Python implementation (package: solar_tracke
     test_angles.py                # Angles test suite (148 parametrized cases)
     test_lookup_table.py          # Lookup table test suite
 
+rust/                             # Rust implementation (crate: solar_tracker)
+  Cargo.toml                      # No external dependencies
+  src/
+    lib.rs                        # Crate root, mod declarations + pub use re-exports
+    types.rs                      # Structs, enums, Default impl
+    angles.rs                     # Core solar position & panel angle calculations
+    lookup_table.rs               # Precomputed lookup tables
+  tests/
+    test_angles.rs                # Angles integration tests (49 tests)
+    test_lookup_table.rs          # Lookup table integration tests (33 tests)
+
 dev/archnotes/                    # Design documents
 doc/                              # Implementation notes
 ```
@@ -54,15 +65,25 @@ doc/                              # Implementation notes
 - No external dependencies (stdlib only); `pytest` is a dev dependency
 - Run tests: `cd python && python -m pytest`
 
+### Rust (`rust/`)
+
+- Crate: `solar_tracker`
+- Structs with derives for return types (`SolarPosition`, `DualAxisAngles`, etc.)
+- `Season` is an enum with variants `Summer`, `Winter`, `Spring`, `Fall`
+- Generic `LookupTable<E>` and `DayData<E>` with type aliases `SingleAxisTable` / `DualAxisTable`
+- No external dependencies (std only)
+- Run tests: `cd rust && cargo test`
+- Lint: `cd rust && cargo clippy -- -D warnings`
+
 ## Architecture
 
 **Calculation pipeline:** day-of-year → intermediate angle B → equation of time → local solar time → hour angle + declination → zenith/azimuth → panel angles
 
-**Module structure (both implementations):**
+**Module structure (all implementations):**
 - `angles` — Core solar position and panel angle functions. Entry point is `solar_position` / `solar-position` which returns all computed angles.
 - `lookup_table` / `lookup-table` — Precomputed angle tables indexed by `[day-of-year][interval]`. Depends on `angles`.
 
-**Conventions (shared across both implementations):**
+**Conventions (shared across all implementations):**
 - Angles in degrees (radians only internally for trig)
 - Latitude positive = North, longitude negative = West
 - Azimuth: 0° = North, 90° = East, 180° = South, 270° = West
