@@ -109,8 +109,49 @@
     (+ v1 (* fraction (- v2 v1)))))
 
 ;;; ============================================================
-;;; Single-Axis Table Generation
+;;; Table Generation
 ;;; ============================================================
+
+(defn- generate-table
+  "Shared table generation. Iterates days 1-365, computes solar position
+   at each interval within the daylight window (plus buffers), and calls
+   entry-fn to produce each entry map.
+
+   entry-fn: (fn [minutes pos is-daylight?]) -> entry map
+   bytes-per-entry: used for storage estimate"
+  [config entry-fn bytes-per-entry]
+  (let [{:keys [interval-minutes latitude longitude std-meridian year
+                sunrise-buffer-minutes sunset-buffer-minutes]} config
+        n-intervals (intervals-per-day interval-minutes)
+        days (vec
+              (for [doy (range 1 366)]
+                (let [{:keys [sunrise sunset]} (estimate-sunrise-sunset latitude doy)
+                      start-minute (max 0 (- sunrise sunrise-buffer-minutes))
+                      end-minute (min 1439 (+ sunset sunset-buffer-minutes))
+                      [month day-of-month] (doy->month-day year doy)
+                      entries (vec
+                               (for [interval (range n-intervals)
+                                     :let [minutes (* interval interval-minutes)]
+                                     :when (and (>= minutes start-minute)
+                                                (<= minutes end-minute))]
+                                 (let [[hour minute] (minutes->time minutes)
+                                       pos (angles/solar-position latitude longitude year
+                                                                   month day-of-month
+                                                                   hour minute std-meridian)
+                                       is-daylight? (and (>= minutes sunrise)
+                                                         (<= minutes sunset))]
+                                   (entry-fn minutes pos is-daylight?))))]
+                  {:day-of-year doy
+                   :sunrise-minutes sunrise
+                   :sunset-minutes sunset
+                   :entries entries})))
+        total-entries (reduce + (map (comp count :entries) days))
+        storage-kb (/ (* total-entries bytes-per-entry) 1024.0)]
+    {:config config
+     :days days
+     :metadata {:generated-at (str (java.time.Instant/now))
+                :total-entries total-entries
+                :storage-estimate-kb storage-kb}}))
 
 (defn generate-single-axis-table
   "Generate a single-axis tracker lookup table.
@@ -124,44 +165,13 @@
            ...]
     :metadata {:generated-at ... :total-entries ... :storage-estimate-kb ...}}"
   [config]
-  (let [{:keys [interval-minutes latitude longitude std-meridian year
-                sunrise-buffer-minutes sunset-buffer-minutes]} config
-        days (vec
-              (for [doy (range 1 366)]
-                (let [{:keys [sunrise sunset]} (estimate-sunrise-sunset latitude doy)
-                      start-minute (max 0 (- sunrise sunrise-buffer-minutes))
-                      end-minute (min 1439 (+ sunset sunset-buffer-minutes))
-                      [month day-of-month] (doy->month-day year doy)
-                      entries (vec
-                               (for [interval (range (intervals-per-day interval-minutes))
-                                     :let [minutes (* interval interval-minutes)]
-                                     :when (and (>= minutes start-minute)
-                                                (<= minutes end-minute))]
-                                 (let [[hour minute] (minutes->time minutes)
-                                       pos (angles/solar-position latitude longitude year
-                                                                   month day-of-month
-                                                                   hour minute std-meridian)
-                                       is-daylight? (and (>= minutes sunrise)
-                                                         (<= minutes sunset))]
-                                   {:minutes minutes
-                                    :rotation (when is-daylight?
-                                                (angles/single-axis-tilt pos latitude))})))]
-                  {:day-of-year doy
-                   :sunrise-minutes sunrise
-                   :sunset-minutes sunset
-                   :entries entries})))
-        total-entries (reduce + (map (comp count :entries) days))
-        ;; Single-axis: 1 float per entry + minutes index
-        storage-kb (/ (* total-entries 4) 1024.0)]
-    {:config config
-     :days days
-     :metadata {:generated-at (str (java.time.Instant/now))
-                :total-entries total-entries
-                :storage-estimate-kb storage-kb}}))
-
-;;; ============================================================
-;;; Dual-Axis Table Generation
-;;; ============================================================
+  (let [latitude (:latitude config)]
+    (generate-table config
+                    (fn [minutes pos is-daylight?]
+                      {:minutes minutes
+                       :rotation (when is-daylight?
+                                   (angles/single-axis-tilt pos latitude))})
+                    4)))
 
 (defn generate-dual-axis-table
   "Generate a dual-axis tracker lookup table.
@@ -175,77 +185,57 @@
            ...]
     :metadata {:generated-at ... :total-entries ... :storage-estimate-kb ...}}"
   [config]
-  (let [{:keys [interval-minutes latitude longitude std-meridian year
-                sunrise-buffer-minutes sunset-buffer-minutes]} config
-        days (vec
-              (for [doy (range 1 366)]
-                (let [{:keys [sunrise sunset]} (estimate-sunrise-sunset latitude doy)
-                      start-minute (max 0 (- sunrise sunrise-buffer-minutes))
-                      end-minute (min 1439 (+ sunset sunset-buffer-minutes))
-                      [month day-of-month] (doy->month-day year doy)
-                      entries (vec
-                               (for [interval (range (intervals-per-day interval-minutes))
-                                     :let [minutes (* interval interval-minutes)]
-                                     :when (and (>= minutes start-minute)
-                                                (<= minutes end-minute))]
-                                 (let [[hour minute] (minutes->time minutes)
-                                       pos (angles/solar-position latitude longitude year
-                                                                   month day-of-month
-                                                                   hour minute std-meridian)
-                                       is-daylight? (and (>= minutes sunrise)
-                                                         (<= minutes sunset))]
-                                   (if is-daylight?
-                                     (let [da (angles/dual-axis-angles pos)]
-                                       {:minutes minutes
-                                        :tilt (:tilt da)
-                                        :panel-azimuth (:panel-azimuth da)})
-                                     {:minutes minutes
-                                      :tilt nil
-                                      :panel-azimuth nil}))))]
-                  {:day-of-year doy
-                   :sunrise-minutes sunrise
-                   :sunset-minutes sunset
-                   :entries entries})))
-        total-entries (reduce + (map (comp count :entries) days))
-        ;; Dual-axis: 2 floats per entry
-        storage-kb (/ (* total-entries 8) 1024.0)]
-    {:config config
-     :days days
-     :metadata {:generated-at (str (java.time.Instant/now))
-                :total-entries total-entries
-                :storage-estimate-kb storage-kb}}))
+  (generate-table config
+                  (fn [minutes pos is-daylight?]
+                    (if is-daylight?
+                      (let [da (angles/dual-axis-angles pos)]
+                        {:minutes minutes
+                         :tilt (:tilt da)
+                         :panel-azimuth (:panel-azimuth da)})
+                      {:minutes minutes
+                       :tilt nil
+                       :panel-azimuth nil}))
+                  8))
 
 ;;; ============================================================
 ;;; Lookup Functions
 ;;; ============================================================
+
+(defn- find-bracketing-entries
+  "Find the two entries bracketing the given minutes value.
+   Returns [entry-before entry-after fraction] or nil if outside range.
+   Uses O(1) index computation from the regular interval spacing."
+  [entries interval-minutes minutes]
+  (when (seq entries)
+    (let [first-minutes (:minutes (first entries))
+          last-minutes (:minutes (peek entries))]
+      (when (and (>= minutes first-minutes)
+                 (<= minutes last-minutes))
+        (let [idx-before (min (quot (- minutes first-minutes) interval-minutes)
+                              (dec (count entries)))
+              entry-before (get entries idx-before)
+              entry-after (get entries (inc idx-before))
+              t0 (:minutes entry-before)]
+          (if (or (nil? entry-after) (= minutes t0))
+            [entry-before nil 0.0]
+            (let [t1 (:minutes entry-after)
+                  fraction (/ (double (- minutes t0)) (- t1 t0))]
+              [entry-before entry-after fraction])))))))
 
 (defn lookup-single-axis
   "Look up single-axis rotation from table with linear interpolation.
 
    Returns interpolated {:minutes m :rotation angle} or nil if outside range."
   [table day-of-year minutes]
-  (let [day-data (get (:days table) (dec day-of-year))
-        entries (:entries day-data)]
-    (when (seq entries)
-      (let [first-entry (first entries)
-            last-entry (peek entries)]
-        (when (and (>= minutes (:minutes first-entry))
-                   (<= minutes (:minutes last-entry)))
-          (let [idx-before (last (keep-indexed
-                                  (fn [i e] (when (<= (:minutes e) minutes) i))
-                                  entries))
-                entry-before (get entries idx-before)
-                entry-after (get entries (inc idx-before))]
-            (if (or (nil? entry-after)
-                    (= minutes (:minutes entry-before)))
-              {:minutes minutes :rotation (:rotation entry-before)}
-              (let [t0 (:minutes entry-before)
-                    t1 (:minutes entry-after)
-                    fraction (/ (double (- minutes t0)) (- t1 t0))]
-                {:minutes minutes
-                 :rotation (interpolate-linear (:rotation entry-before)
-                                               (:rotation entry-after)
-                                               fraction)}))))))))
+  (let [entries (:entries (get (:days table) (dec day-of-year)))
+        interval-minutes (get-in table [:config :interval-minutes])]
+    (when-let [[before after fraction] (find-bracketing-entries entries interval-minutes minutes)]
+      (if (nil? after)
+        {:minutes minutes :rotation (:rotation before)}
+        {:minutes minutes
+         :rotation (interpolate-linear (:rotation before)
+                                       (:rotation after)
+                                       fraction)}))))
 
 (defn lookup-dual-axis
   "Look up dual-axis angles from table with linear interpolation.
@@ -254,34 +244,20 @@
    if outside range. Uses interpolate-angle for panel-azimuth to handle
    360 deg wraparound."
   [table day-of-year minutes]
-  (let [day-data (get (:days table) (dec day-of-year))
-        entries (:entries day-data)]
-    (when (seq entries)
-      (let [first-entry (first entries)
-            last-entry (peek entries)]
-        (when (and (>= minutes (:minutes first-entry))
-                   (<= minutes (:minutes last-entry)))
-          (let [idx-before (last (keep-indexed
-                                  (fn [i e] (when (<= (:minutes e) minutes) i))
-                                  entries))
-                entry-before (get entries idx-before)
-                entry-after (get entries (inc idx-before))]
-            (if (or (nil? entry-after)
-                    (= minutes (:minutes entry-before)))
-              {:minutes minutes
-               :tilt (:tilt entry-before)
-               :panel-azimuth (:panel-azimuth entry-before)}
-              (let [t0 (:minutes entry-before)
-                    t1 (:minutes entry-after)
-                    fraction (/ (double (- minutes t0)) (- t1 t0))]
-                {:minutes minutes
-                 :tilt (interpolate-linear (:tilt entry-before)
-                                           (:tilt entry-after)
-                                           fraction)
-                 :panel-azimuth (interpolate-angle (:panel-azimuth entry-before)
-                                                   (:panel-azimuth entry-after)
-                                                   fraction)}))))))))
-
+  (let [entries (:entries (get (:days table) (dec day-of-year)))
+        interval-minutes (get-in table [:config :interval-minutes])]
+    (when-let [[before after fraction] (find-bracketing-entries entries interval-minutes minutes)]
+      (if (nil? after)
+        {:minutes minutes
+         :tilt (:tilt before)
+         :panel-azimuth (:panel-azimuth before)}
+        {:minutes minutes
+         :tilt (interpolate-linear (:tilt before)
+                                   (:tilt after)
+                                   fraction)
+         :panel-azimuth (interpolate-angle (:panel-azimuth before)
+                                           (:panel-azimuth after)
+                                           fraction)}))))
 ;;; ============================================================
 ;;; Compact Export
 ;;; ============================================================

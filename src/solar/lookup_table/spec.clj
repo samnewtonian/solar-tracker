@@ -72,41 +72,21 @@
 (s/def ::sunset-minutes
   (s/and int? #(<= 0 % 1440)))
 
-(s/def ::single-axis-entries
-  (s/coll-of ::single-axis-entry :kind vector?))
-
-(s/def ::dual-axis-entries
-  (s/coll-of ::dual-axis-entry :kind vector?))
-
-(s/def ::single-axis-day
-  (s/keys :req-un [::day-of-year ::sunrise-minutes ::sunset-minutes]
-          :opt-un []))
-
-(s/def ::dual-axis-day
-  (s/keys :req-un [::day-of-year ::sunrise-minutes ::sunset-minutes]
-          :opt-un []))
-
 ;;; ============================================================
 ;;; Table Specs
 ;;; ============================================================
 
 (s/def ::total-entries
-  pos-int?)
+  nat-int?)
 
 (s/def ::storage-estimate-kb
-  (s/and number? pos?))
+  (s/and number? #(>= % 0)))
 
 (s/def ::generated-at
   string?)
 
 (s/def ::metadata
   (s/keys :req-un [::generated-at ::total-entries ::storage-estimate-kb]))
-
-(s/def ::single-axis-days
-  (s/coll-of ::single-axis-day :kind vector? :min-count 365 :max-count 365))
-
-(s/def ::dual-axis-days
-  (s/coll-of ::dual-axis-day :kind vector? :min-count 365 :max-count 365))
 
 (s/def ::single-axis-table
   (s/keys :req-un [::config ::metadata]))
@@ -134,9 +114,12 @@
   :args (s/cat :year ::year :doy ::day-of-year)
   :ret (s/tuple (s/int-in 1 13) (s/int-in 1 32)))
 
+(s/def ::sunrise (s/and int? #(<= 0 % 1440)))
+(s/def ::sunset (s/and int? #(<= 0 % 1440)))
+
 (s/fdef lt/estimate-sunrise-sunset
   :args (s/cat :latitude ::latitude :day-of-year ::day-of-year)
-  :ret (s/keys :req-un [::sunrise-minutes ::sunset-minutes]))
+  :ret (s/keys :req-un [::sunrise ::sunset]))
 
 (s/fdef lt/interpolate-angle
   :args (s/cat :a1 number? :a2 number? :fraction (s/and number? #(<= 0 % 1)))
