@@ -1,6 +1,7 @@
 """Port of angles_test.clj — solar angle calculation tests."""
 
 import math
+from datetime import datetime, timedelta, timezone
 
 import pytest
 
@@ -20,6 +21,12 @@ from solar_tracker.angles import (
     solar_position,
     solar_zenith_angle,
 )
+
+
+def _dt(year, month, day, hour, minute, offset_hours):
+    """Create a timezone-aware datetime from an offset in hours."""
+    tz = timezone(timedelta(hours=offset_hours))
+    return datetime(year, month, day, hour, minute, tzinfo=tz)
 
 
 class TestDayOfYear:
@@ -104,7 +111,7 @@ class TestSolarDeclination:
 class TestSolarPositionSpringfieldEquinox:
     @pytest.fixture
     def pos(self):
-        return solar_position(39.8, -89.6, 2026, 3, 21, 12, 0, -90.0)
+        return solar_position(39.8, -89.6, _dt(2026, 3, 21, 12, 0, -6))
 
     def test_day_of_year(self, pos):
         assert pos.day_of_year == 80
@@ -127,7 +134,7 @@ class TestSolarPositionSpringfieldEquinox:
 
 class TestSolarPositionSummerSolstice:
     def test_summer_solstice(self):
-        pos = solar_position(39.8, -89.6, 2026, 6, 21, 12, 0, -90.0)
+        pos = solar_position(39.8, -89.6, _dt(2026, 6, 21, 12, 0, -6))
         assert pos.declination == pytest.approx(23.45, abs=1.0)
         assert pos.zenith < 40.0
         assert pos.altitude > 50.0
@@ -135,7 +142,7 @@ class TestSolarPositionSummerSolstice:
 
 class TestSolarPositionWinterSolstice:
     def test_winter_solstice(self):
-        pos = solar_position(39.8, -89.6, 2026, 12, 21, 12, 0, -90.0)
+        pos = solar_position(39.8, -89.6, _dt(2026, 12, 21, 12, 0, -6))
         assert pos.declination == pytest.approx(-23.45, abs=1.0)
         assert pos.zenith > 40.0
         assert pos.altitude < 50.0
@@ -143,26 +150,26 @@ class TestSolarPositionWinterSolstice:
 
 class TestSingleAxisTilt:
     def test_near_zero_at_noon(self):
-        pos = solar_position(39.8, -89.6, 2026, 3, 21, 12, 0, -90.0)
+        pos = solar_position(39.8, -89.6, _dt(2026, 3, 21, 12, 0, -6))
         assert single_axis_tilt(pos, 39.8) == pytest.approx(0.0, abs=5.0)
 
     def test_negative_in_morning(self):
-        pos = solar_position(39.8, -89.6, 2026, 3, 21, 9, 0, -90.0)
+        pos = solar_position(39.8, -89.6, _dt(2026, 3, 21, 9, 0, -6))
         assert single_axis_tilt(pos, 39.8) < 0.0
 
     def test_positive_in_afternoon(self):
-        pos = solar_position(39.8, -89.6, 2026, 3, 21, 15, 0, -90.0)
+        pos = solar_position(39.8, -89.6, _dt(2026, 3, 21, 15, 0, -6))
         assert single_axis_tilt(pos, 39.8) > 0.0
 
 
 class TestDualAxisAngles:
     def test_tilt_equals_zenith(self):
-        pos = solar_position(39.8, -89.6, 2026, 3, 21, 12, 0, -90.0)
+        pos = solar_position(39.8, -89.6, _dt(2026, 3, 21, 12, 0, -6))
         da = dual_axis_angles(pos)
         assert da.tilt == pytest.approx(pos.zenith, abs=0.01)
 
     def test_panel_azimuth_opposite_sun(self):
-        pos = solar_position(39.8, -89.6, 2026, 3, 21, 12, 0, -90.0)
+        pos = solar_position(39.8, -89.6, _dt(2026, 3, 21, 12, 0, -6))
         da = dual_axis_angles(pos)
         assert (354.0 <= da.panel_azimuth <= 360.0) or (0.0 <= da.panel_azimuth <= 5.0)
 
@@ -251,7 +258,7 @@ class TestDegRadRoundtrip:
 
 class TestEquatorSolarNoonEquinox:
     def test_sun_overhead(self):
-        pos = solar_position(0.0, 0.0, 2026, 3, 21, 12, 0, 0.0)
+        pos = solar_position(0.0, 0.0, _dt(2026, 3, 21, 12, 0, 0))
         assert pos.declination == pytest.approx(0.0, abs=1.0)
         assert pos.zenith < 5.0
         assert pos.altitude > 85.0
@@ -259,61 +266,61 @@ class TestEquatorSolarNoonEquinox:
 
 class TestPolarLatitude:
     def test_summer(self):
-        pos = solar_position(70.0, 15.0, 2026, 6, 21, 12, 0, 15.0)
+        pos = solar_position(70.0, 15.0, _dt(2026, 6, 21, 12, 0, 1))
         assert pos.altitude > 0.0
         assert pos.zenith < 90.0
 
     def test_winter(self):
-        pos = solar_position(70.0, 15.0, 2026, 12, 21, 12, 0, 15.0)
+        pos = solar_position(70.0, 15.0, _dt(2026, 12, 21, 12, 0, 1))
         assert pos.zenith > 85.0
 
 
 class TestSouthernHemisphere:
     def test_reversed_seasons(self):
-        pos_jun = solar_position(-33.9, 151.2, 2026, 6, 21, 12, 0, 150.0)
-        pos_dec = solar_position(-33.9, 151.2, 2026, 12, 21, 12, 0, 150.0)
+        pos_jun = solar_position(-33.9, 151.2, _dt(2026, 6, 21, 12, 0, 10))
+        pos_dec = solar_position(-33.9, 151.2, _dt(2026, 12, 21, 12, 0, 10))
         assert pos_jun.zenith > pos_dec.zenith
         assert pos_jun.altitude < pos_dec.altitude
 
 
 class TestMidnightPosition:
     def test_below_horizon(self):
-        pos = solar_position(39.8, -89.6, 2026, 3, 21, 0, 0, -90.0)
+        pos = solar_position(39.8, -89.6, _dt(2026, 3, 21, 0, 0, -6))
         assert pos.altitude < 0.0
         assert pos.zenith > 90.0
 
 
 class TestZenithAltitudeComplement:
     @pytest.mark.parametrize(
-        "lat,lon,yr,mo,dy,hr,mn,std",
+        "lat,lon,yr,mo,dy,hr,mn,offset_hours",
         [
-            (39.8, -89.6, 2026, 3, 21, 12, 0, -90.0),
-            (0.0, 0.0, 2026, 6, 21, 12, 0, 0.0),
-            (-33.9, 151.2, 2026, 12, 21, 15, 30, 150.0),
-            (51.5, -0.1, 2026, 9, 22, 8, 0, 0.0),
-            (70.0, 25.0, 2026, 6, 21, 18, 0, 30.0),
+            (39.8, -89.6, 2026, 3, 21, 12, 0, -6),
+            (0.0, 0.0, 2026, 6, 21, 12, 0, 0),
+            (-33.9, 151.2, 2026, 12, 21, 15, 30, 10),
+            (51.5, -0.1, 2026, 9, 22, 8, 0, 0),
+            (70.0, 25.0, 2026, 6, 21, 18, 0, 2),
         ],
     )
-    def test_complement(self, lat, lon, yr, mo, dy, hr, mn, std):
-        pos = solar_position(lat, lon, yr, mo, dy, hr, mn, std)
+    def test_complement(self, lat, lon, yr, mo, dy, hr, mn, offset_hours):
+        pos = solar_position(lat, lon, _dt(yr, mo, dy, hr, mn, offset_hours))
         assert pos.zenith + pos.altitude == pytest.approx(90.0, abs=1e-10)
 
 
 class TestAzimuthAlwaysNormalized:
     @pytest.mark.parametrize(
-        "lat,lon,yr,mo,dy,hr,mn,std",
+        "lat,lon,yr,mo,dy,hr,mn,offset_hours",
         [
-            (39.8, -89.6, 2026, 1, 15, 8, 0, -90.0),
-            (39.8, -89.6, 2026, 1, 15, 16, 0, -90.0),
-            (39.8, -89.6, 2026, 7, 15, 6, 0, -90.0),
-            (39.8, -89.6, 2026, 7, 15, 20, 0, -90.0),
-            (-45.0, 170.0, 2026, 3, 21, 12, 0, 180.0),
-            (60.0, 10.0, 2026, 6, 21, 3, 0, 15.0),
-            (0.0, 0.0, 2026, 9, 22, 12, 0, 0.0),
+            (39.8, -89.6, 2026, 1, 15, 8, 0, -6),
+            (39.8, -89.6, 2026, 1, 15, 16, 0, -6),
+            (39.8, -89.6, 2026, 7, 15, 6, 0, -6),
+            (39.8, -89.6, 2026, 7, 15, 20, 0, -6),
+            (-45.0, 170.0, 2026, 3, 21, 12, 0, 12),
+            (60.0, 10.0, 2026, 6, 21, 3, 0, 1),
+            (0.0, 0.0, 2026, 9, 22, 12, 0, 0),
         ],
     )
-    def test_in_range(self, lat, lon, yr, mo, dy, hr, mn, std):
-        pos = solar_position(lat, lon, yr, mo, dy, hr, mn, std)
+    def test_in_range(self, lat, lon, yr, mo, dy, hr, mn, offset_hours):
+        pos = solar_position(lat, lon, _dt(yr, mo, dy, hr, mn, offset_hours))
         assert 0.0 <= pos.azimuth < 360.0
 
 
@@ -366,23 +373,23 @@ class TestDualAxisPanelAzimuthNormalized:
 
 class TestMultipleCitiesNoonEquinox:
     @pytest.mark.parametrize(
-        "name,lat,lon,std",
+        "name,lat,lon,offset_hours",
         [
-            ("London", 51.5, -0.1, 0.0),
-            ("Tokyo", 35.7, 139.7, 135.0),
-            ("Cape Town", -33.9, 18.4, 30.0),
-            ("Quito", -0.2, -78.5, -75.0),
+            ("London", 51.5, -0.1, 0),
+            ("Tokyo", 35.7, 139.7, 9),
+            ("Cape Town", -33.9, 18.4, 2),
+            ("Quito", -0.2, -78.5, -5),
         ],
     )
-    def test_zenith_approx_latitude(self, name, lat, lon, std):
-        pos = solar_position(lat, lon, 2026, 3, 21, 12, 0, std)
+    def test_zenith_approx_latitude(self, name, lat, lon, offset_hours):
+        pos = solar_position(lat, lon, _dt(2026, 3, 21, 12, 0, offset_hours))
         assert pos.zenith == pytest.approx(abs(lat), abs=8.0), name
 
 
 class TestMorningAfternoonSymmetry:
     def test_symmetric(self):
-        pos_9am = solar_position(39.8, -89.6, 2026, 3, 21, 9, 0, -90.0)
-        pos_3pm = solar_position(39.8, -89.6, 2026, 3, 21, 15, 0, -90.0)
+        pos_9am = solar_position(39.8, -89.6, _dt(2026, 3, 21, 9, 0, -6))
+        pos_3pm = solar_position(39.8, -89.6, _dt(2026, 3, 21, 15, 0, -6))
         assert pos_9am.zenith == pytest.approx(pos_3pm.zenith, abs=5.0)
         assert pos_9am.azimuth < 180.0
         assert pos_3pm.azimuth > 180.0

@@ -68,7 +68,6 @@ class LookupTableConfig:
     interval_minutes: int = 5
     latitude: float = 39.8
     longitude: float = -89.6
-    std_meridian: float = -90.0
     year: int = 2026
     sunrise_buffer_minutes: int = 30
     sunset_buffer_minutes: int = 30

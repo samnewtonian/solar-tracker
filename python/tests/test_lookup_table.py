@@ -30,7 +30,6 @@ class TestConfigValidation:
         assert c.interval_minutes == 5
         assert c.latitude == 39.8
         assert c.longitude == -89.6
-        assert c.std_meridian == -90.0
         assert c.year == 2026
         assert c.sunrise_buffer_minutes == 30
         assert c.sunset_buffer_minutes == 30
@@ -126,18 +125,22 @@ class TestSingleAxisOneDay:
             assert isinstance(entry, SingleAxisEntry)
 
     def test_rotation_near_zero_at_noon(self, table):
-        noon_entries = [e for e in table.days[79].entries if e.minutes == 720]
+        # UTC noon for Springfield: local solar noon ≈ 18:00 UTC (correction ≈ -6h)
+        noon_utc = 1080
+        noon_entries = [e for e in table.days[79].entries if e.minutes == noon_utc]
         if noon_entries:
             assert noon_entries[0].rotation is not None
             assert noon_entries[0].rotation == pytest.approx(0.0, abs=5.0)
 
     def test_morning_negative_afternoon_positive(self, table):
         entries = table.days[79].entries
+        # Morning in UTC for Springfield: ~960 UTC min corresponds to ~6am local solar
         morning = next(
-            (e for e in entries if e.rotation is not None and e.minutes < 600), None
+            (e for e in entries if e.rotation is not None and e.minutes >= 960 and e.minutes < 1065), None
         )
+        # Afternoon in UTC: > 1095 UTC min
         afternoon = next(
-            (e for e in entries if e.rotation is not None and e.minutes > 840), None
+            (e for e in entries if e.rotation is not None and e.minutes > 1095), None
         )
         if morning:
             assert morning.rotation < 0.0
@@ -161,7 +164,8 @@ class TestDualAxisOneDay:
             assert isinstance(entry, DualAxisEntry)
 
     def test_tilt_matches_zenith_at_noon(self, table):
-        noon_entries = [e for e in table.days[79].entries if e.minutes == 720]
+        noon_utc = 1080
+        noon_entries = [e for e in table.days[79].entries if e.minutes == noon_utc]
         if noon_entries:
             assert noon_entries[0].tilt is not None
             assert noon_entries[0].tilt == pytest.approx(40.0, abs=5.0)
@@ -198,20 +202,20 @@ class TestLookupSingleAxis:
         return generate_single_axis_table(config)
 
     def test_exact_boundary(self, table):
-        result = lookup_single_axis(table, 80, 720)
+        result = lookup_single_axis(table, 80, 1080)
         assert result is not None
-        assert result.minutes == 720
+        assert result.minutes == 1080
         assert result.rotation is not None
 
     def test_interpolated(self, table):
-        result = lookup_single_axis(table, 80, 727)
-        at_720 = lookup_single_axis(table, 80, 720)
-        at_735 = lookup_single_axis(table, 80, 735)
+        result = lookup_single_axis(table, 80, 1087)
+        at_1080 = lookup_single_axis(table, 80, 1080)
+        at_1095 = lookup_single_axis(table, 80, 1095)
         assert result is not None
-        assert result.minutes == 727
-        if at_720.rotation is not None and at_735.rotation is not None and result.rotation is not None:
-            lo = min(at_720.rotation, at_735.rotation)
-            hi = max(at_720.rotation, at_735.rotation)
+        assert result.minutes == 1087
+        if at_1080.rotation is not None and at_1095.rotation is not None and result.rotation is not None:
+            lo = min(at_1080.rotation, at_1095.rotation)
+            hi = max(at_1080.rotation, at_1095.rotation)
             assert lo - 0.01 <= result.rotation <= hi + 0.01
 
 
@@ -222,13 +226,13 @@ class TestLookupDualAxis:
         return generate_dual_axis_table(config)
 
     def test_exact_boundary(self, table):
-        result = lookup_dual_axis(table, 80, 720)
+        result = lookup_dual_axis(table, 80, 1080)
         assert result is not None
         assert result.tilt is not None
         assert result.panel_azimuth is not None
 
     def test_interpolated(self, table):
-        result = lookup_dual_axis(table, 80, 727)
+        result = lookup_dual_axis(table, 80, 1087)
         assert result is not None
         assert result.tilt is not None
         assert result.panel_azimuth is not None
