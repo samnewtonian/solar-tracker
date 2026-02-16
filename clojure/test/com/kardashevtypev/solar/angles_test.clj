@@ -2,17 +2,12 @@
   (:require [clojure.test :refer [deftest is testing]]
             [clojure.spec.test.alpha :as stest]
             [com.kardashevtypev.solar.angles :as a]
-            [com.kardashevtypev.solar.angles.spec])
+            [com.kardashevtypev.solar.angles.spec]
+            [com.kardashevtypev.solar.test-util :refer [approx=]])
   (:import [java.time ZonedDateTime ZoneOffset]))
 
 ;; Enable spec instrumentation for tests
 (stest/instrument)
-
-(defn approx=
-  "Test if two numbers are approximately equal within tolerance."
-  ([a b] (approx= a b 0.1))
-  ([a b tolerance]
-   (< (abs (- a b)) tolerance)))
 
 (defn- zdt
   "Construct a ZonedDateTime from year, month, day, hour, minute, and UTC offset hours."

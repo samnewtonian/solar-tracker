@@ -3,13 +3,8 @@
             [clojure.spec.alpha :as s]
             [com.kardashevtypev.solar.lookup-table :as lt]
             [com.kardashevtypev.solar.lookup-table.spec :as lts]
-            [com.kardashevtypev.solar.angles :as angles]))
-
-(defn approx=
-  "Test if two numbers are approximately equal within tolerance."
-  ([a b] (approx= a b 0.1))
-  ([a b tolerance]
-   (< (abs (- a b)) tolerance)))
+            [com.kardashevtypev.solar.angles :as angles]
+            [com.kardashevtypev.solar.test-util :refer [approx=]]))
 
 ;;; ============================================================
 ;;; Config Validation

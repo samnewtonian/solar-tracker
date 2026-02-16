@@ -10,16 +10,18 @@
 
 (def ^:const earth-axial-tilt 23.45)
 (def ^:const degrees-per-hour 15.0)
+(def ^:const deg->rad-factor (/ math/PI 180.0))
+(def ^:const rad->deg-factor (/ 180.0 math/PI))
 
 (defn deg->rad
   "Convert degrees to radians."
   [deg]
-  (* deg (/ math/PI 180.0)))
+  (* deg deg->rad-factor))
 
 (defn rad->deg
   "Convert radians to degrees."
   [rad]
-  (* rad (/ 180.0 math/PI)))
+  (* rad rad->deg-factor))
 
 (defn normalize-angle
   "Normalize angle to 0-360 degree range."
@@ -30,15 +32,22 @@
 ;;; Date Utilities
 ;;; ============================================================
 
+(defn leap-year?
+  "Returns true if year is a leap year."
+  [year]
+  (or (zero? (mod year 400))
+      (and (zero? (mod year 4))
+           (not (zero? (mod year 100))))))
+
+(defn days-in-months
+  "Returns a vector of days per month for the given year."
+  [year]
+  [31 (if (leap-year? year) 29 28) 31 30 31 30 31 31 30 31 30 31])
+
 (defn day-of-year
-  "Calculate day of year (1-366) from year, month, day.
-   Uses the standard algorithm accounting for leap years."
+  "Calculate day of year (1-366) from year, month, day."
   [year month day]
-  (let [leap? (or (zero? (mod year 400))
-                  (and (zero? (mod year 4))
-                       (not (zero? (mod year 100)))))
-        days-in-months [31 (if leap? 29 28) 31 30 31 30 31 31 30 31 30 31]
-        days-before-month (reduce + (take (dec month) days-in-months))]
+  (let [days-before-month (reduce + (take (dec month) (days-in-months year)))]
     (+ days-before-month day)))
 
 ;;; ============================================================
@@ -146,6 +155,12 @@
     ;; Convert to degrees and normalize to [0, 360)
     (normalize-angle (rad->deg az-rad))))
 
+(defn utc-lst-correction
+  "Compute the UTC→LST correction in hours for a given longitude and equation of time.
+   LST = mod(utc-hours + correction, 24)."
+  [longitude eot]
+  (+ (/ (* 4.0 longitude) 60.0) (/ eot 60.0)))
+
 (defn solar-angles-at
   "Compute solar angles from precomputed day-constants and UTC time.
    Returns {:local-solar-time :hour-angle :zenith :altitude :azimuth}.
@@ -153,7 +168,7 @@
    Inputs:
      latitude   - Observer's latitude in degrees
      decl       - Solar declination in degrees
-     correction - UTC→LST correction in hours: (+ (/ (* 4.0 longitude) 60.0) (/ eot 60.0))
+     correction - UTC→LST correction in hours (from utc-lst-correction)
      utc-hours  - UTC time in decimal hours"
   [latitude decl correction utc-hours]
   (let [lst    (mod (+ utc-hours correction) 24.0)
@@ -181,7 +196,7 @@
                  Internally converted to UTC via .withZoneSameInstant.
 
    Returns a map containing:
-     :day-of-year    - Julian day number (in UTC)
+     :day-of-year    - Ordinal day of year in UTC (1-366)
      :declination    - Solar declination (degrees)
      :equation-of-time - Equation of time correction (minutes)
      :local-solar-time - True solar time (decimal hours)
@@ -194,11 +209,13 @@
         year       (.getYear utc)
         month      (.getMonthValue utc)
         day-of-mon (.getDayOfMonth utc)
-        utc-hours  (+ (.getHour utc) (/ (.getMinute utc) 60.0))
+        utc-hours  (+ (.getHour utc)
+                      (/ (.getMinute utc) 60.0)
+                      (/ (.getSecond utc) 3600.0))
         n          (day-of-year year month day-of-mon)
         eot        (equation-of-time n)
         decl       (solar-declination n)
-        correction (+ (/ (* 4.0 longitude) 60.0) (/ eot 60.0))
+        correction (utc-lst-correction longitude eot)
         angles     (solar-angles-at latitude decl correction utc-hours)]
     (merge {:day-of-year n
             :declination decl

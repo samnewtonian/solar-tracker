@@ -82,9 +82,21 @@
 ;;; Function Specs (fdef)
 ;;; ============================================================
 
+(s/fdef angles/leap-year?
+  :args (s/cat :year ::year)
+  :ret boolean?)
+
+(s/fdef angles/days-in-months
+  :args (s/cat :year ::year)
+  :ret (s/coll-of pos-int? :count 12))
+
 (s/fdef angles/day-of-year
   :args (s/cat :year ::year :month ::month :day ::day)
   :ret ::day-of-year)
+
+(s/fdef angles/utc-lst-correction
+  :args (s/cat :longitude ::longitude :eot ::equation-of-time)
+  :ret number?)
 
 (s/fdef angles/solar-position
   :args (s/cat :latitude ::latitude
