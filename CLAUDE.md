@@ -4,35 +4,76 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Solar angle calculation library for computing optimal solar panel angles based on date, time, and geographic position. Supports fixed installations, single-axis trackers, and dual-axis trackers. Intended language is Clojure.
+Solar angle calculation library for computing optimal solar panel angles based on date, time, and geographic position. Supports fixed installations, single-axis trackers, and dual-axis trackers. Implemented in both Clojure and Python with numerically identical results.
 
-## Project Status
+## Project Structure
 
-**Implemented:**
-- `com.kardashevtypev.solar.angles` — Core solar position and panel angle calculations (src/com/kardashevtypev/solar/angles.clj)
-- `com.kardashevtypev.solar.angles.spec` — Clojure specs for validation (src/com/kardashevtypev/solar/angles/spec.clj)
-- `com.kardashevtypev.solar.lookup-table` — Precomputed lookup tables for single-axis and dual-axis trackers (src/com/kardashevtypev/solar/lookup_table.clj)
-- `com.kardashevtypev.solar.lookup-table.spec` — Specs for lookup table config and structures (src/com/kardashevtypev/solar/lookup_table/spec.clj)
-- Comprehensive test suites (test/com/kardashevtypev/solar/angles_test.clj, test/com/kardashevtypev/solar/lookup_table_test.clj)
+```
+clojure/                          # Clojure implementation
+  deps.edn                        # Project dependencies
+  src/com/kardashevtypev/solar/
+    angles.clj                    # Core solar position & panel angle calculations
+    angles/spec.clj               # Clojure specs for validation
+    lookup_table.clj              # Precomputed lookup tables
+    lookup_table/spec.clj         # Specs for lookup table config & structures
+  test/com/kardashevtypev/solar/
+    angles_test.clj               # Angles test suite (42 tests / 11k+ assertions)
+    lookup_table_test.clj         # Lookup table test suite
 
-**Design documents** in `dev/archnotes/`:
-- `solar-panel-angle-calculations.md` — Core solar position formulas (declination, hour angle, zenith, azimuth, equation of time) and panel angle calculations for all tracker types. Contains the reference Clojure implementation.
-- `solar-angle-lookup-tables.md` — Precomputed lookup table design for embedded/real-time use. Covers table structures, compact encodings (int16, delta, polynomial), interpolation, and storage budgets.
+python/                           # Python implementation (package: solar_tracker)
+  pyproject.toml                  # Hatchling build, requires Python >=3.11
+  solar_tracker/
+    __init__.py                   # Re-exports full public API
+    _types.py                     # Frozen dataclasses & Season StrEnum
+    angles.py                     # Core solar position & panel angle calculations
+    lookup_table.py               # Precomputed lookup tables
+  tests/
+    conftest.py                   # Shared test config
+    test_angles.py                # Angles test suite (148 parametrized cases)
+    test_lookup_table.py          # Lookup table test suite
 
-## Architecture (from design docs)
+dev/archnotes/                    # Design documents
+doc/                              # Implementation notes
+```
+
+## Implementation Notes
+
+### Clojure (`clojure/`)
+
+- Package: `com.kardashevtypev.solar.{angles,lookup-table}`
+- Keyword maps for return types (`:zenith`, `:altitude`, `:azimuth`, etc.)
+- Clojure specs for input/output validation
+- Run tests: `cd clojure && clj -X:test`
+
+### Python (`python/`)
+
+- Package: `solar_tracker`
+- Frozen dataclasses for return types (`SolarPosition`, `DualAxisAngles`, etc.)
+- `Season` is a `StrEnum` (`"summer"`, `"winter"`, `"spring"`, `"fall"`)
+- Type hints on all public functions; no runtime validation module
+- No external dependencies (stdlib only); `pytest` is a dev dependency
+- Run tests: `cd python && python -m pytest`
+
+## Architecture
 
 **Calculation pipeline:** day-of-year → intermediate angle B → equation of time → local solar time → hour angle + declination → zenith/azimuth → panel angles
 
-**Key namespaces:**
-- `com.kardashevtypev.solar.angles` — Core solar position and panel angle functions. Entry point is `solar-position` which returns a map with `:zenith`, `:altitude`, `:azimuth`, `:hour-angle`, `:declination`, etc.
-- `com.kardashevtypev.solar.lookup-table` — Precomputed angle tables indexed by `[day-of-year][interval]`. Depends on `com.kardashevtypev.solar.angles`.
+**Module structure (both implementations):**
+- `angles` — Core solar position and panel angle functions. Entry point is `solar_position` / `solar-position` which returns all computed angles.
+- `lookup_table` / `lookup-table` — Precomputed angle tables indexed by `[day-of-year][interval]`. Depends on `angles`.
 
-**Conventions:**
+**Conventions (shared across both implementations):**
 - Angles in degrees (radians only internally for trig)
 - Latitude positive = North, longitude negative = West
 - Azimuth: 0° = North, 90° = East, 180° = South, 270° = West
 - Hour angle: negative = morning, positive = afternoon, 0° = solar noon
 - Default reference location: Springfield, IL (39.8°N, 89.6°W, std meridian -90°)
+
+## Design Documents
+
+In `dev/archnotes/`:
+- `solar-panel-angle-calculations.md` — Core solar position formulas (declination, hour angle, zenith, azimuth, equation of time) and panel angle calculations for all tracker types.
+- `solar-angle-lookup-tables.md` — Precomputed lookup table design for embedded/real-time use. Covers table structures, compact encodings (int16, delta, polynomial), interpolation, and storage budgets.
 
 ## Git Commit Handling
 
