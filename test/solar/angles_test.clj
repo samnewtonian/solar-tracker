@@ -76,8 +76,7 @@
       (is (approx= 50.0 (:altitude pos) 2.0)
           "Altitude around 50° (complement of zenith)")
 
-      (is (or (approx= 179.0 (:azimuth pos) 5.0)
-              (approx= 180.0 (:azimuth pos) 5.0))
+      (is (<= 174.0 (:azimuth pos) 185.0)
           "Azimuth near 179-180° (nearly due south)"))))
 
 (deftest solar-position-summer-solstice-test
@@ -137,8 +136,8 @@
 
       ;; Panel azimuth should be opposite of solar azimuth (face the sun)
       ;; Solar azimuth ~179° means panel should face ~359° (nearly north, facing south sun)
-      (is (or (approx= 359.0 panel-azimuth 5.0)
-              (approx= 0.0 panel-azimuth 5.0))
+      (is (or (<= 354.0 panel-azimuth 360.0)
+              (<= 0.0 panel-azimuth 5.0))
           "Panel azimuth opposite of sun position"))))
 
 (deftest optimal-fixed-tilt-test

@@ -23,7 +23,7 @@
 (defn normalize-angle
   "Normalize angle to 0-360 degree range."
   [angle]
-  (mod (+ (mod angle 360.0) 360.0) 360.0))
+  (mod angle 360.0))
 
 ;;; ============================================================
 ;;; Date Utilities
@@ -73,10 +73,10 @@
      local-time     - Clock time in decimal hours (e.g., 14.5 for 2:30 PM)
      std-meridian   - Standard meridian for time zone (degrees, negative for West)
      local-longitude - Observer's longitude (degrees, negative for West)
-     day-of-year    - Day number (1-365)
+     n              - Day number (1-365)
    Output: Local solar time in decimal hours"
-  [local-time std-meridian local-longitude day-of-year]
-  (let [eot (equation-of-time day-of-year)
+  [local-time std-meridian local-longitude n]
+  (let [eot (equation-of-time n)
         ;; Longitude correction: 4 minutes per degree difference
         long-correction (/ (* 4.0 (- std-meridian local-longitude)) 60.0)
         ;; Equation of time correction (convert from minutes to hours)
@@ -151,8 +151,6 @@
   (let [lat-rad (deg->rad latitude)
         dec-rad (deg->rad declination)
         ha-rad (deg->rad hour-angle)
-        alt-rad (deg->rad (solar-altitude zenith-angle))
-
         ;; Calculate azimuth using atan2 for proper quadrant handling
         sin-az (* -1.0 (math/cos dec-rad) (math/sin ha-rad))
         cos-az (- (* (math/sin dec-rad) (math/cos lat-rad))
@@ -221,7 +219,7 @@
 
    Input: solar-position map from (solar-position ...)
    Output: rotation angle in degrees (positive = tilted toward west)"
-  [{:keys [hour-angle] :as solar-pos} latitude]
+  [{:keys [hour-angle]} latitude]
   (let [ha-rad (deg->rad hour-angle)
         lat-rad (deg->rad latitude)]
     (rad->deg (math/atan (/ (math/tan ha-rad)

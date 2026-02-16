@@ -17,7 +17,7 @@
   (s/and number? #(<= -180 % 180)))
 
 (s/def ::year
-  (s/and pos-int?))
+  pos-int?)
 
 (s/def ::month
   (s/int-in 1 13))
@@ -101,14 +101,7 @@
                :hour ::hour
                :minute ::minute
                :std-meridian ::std-meridian)
-  :ret (s/keys :req-un [::day-of-year
-                        ::declination
-                        ::equation-of-time
-                        ::local-solar-time
-                        ::hour-angle
-                        ::zenith
-                        ::altitude
-                        ::azimuth]))
+  :ret ::solar-position-result)
 
 (s/fdef angles/single-axis-tilt
   :args (s/cat :solar-pos (s/keys :req-un [::hour-angle])
