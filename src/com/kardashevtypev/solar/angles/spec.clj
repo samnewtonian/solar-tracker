@@ -1,7 +1,7 @@
-(ns solar.angles.spec
-  "Specs for solar.angles namespace inputs and outputs."
+(ns com.kardashevtypev.solar.angles.spec
+  "Specs for com.kardashevtypev.solar.angles namespace inputs and outputs."
   (:require [clojure.spec.alpha :as s]
-            [solar.angles :as angles]))
+            [com.kardashevtypev.solar.angles :as angles]))
 
 ;;; ============================================================
 ;;; Input Specs

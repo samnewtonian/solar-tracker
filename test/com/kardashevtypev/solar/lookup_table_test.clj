@@ -1,9 +1,9 @@
-(ns solar.lookup-table-test
+(ns com.kardashevtypev.solar.lookup-table-test
   (:require [clojure.test :refer [deftest is testing]]
             [clojure.spec.alpha :as s]
-            [solar.lookup-table :as lt]
-            [solar.lookup-table.spec :as lts]
-            [solar.angles :as angles]))
+            [com.kardashevtypev.solar.lookup-table :as lt]
+            [com.kardashevtypev.solar.lookup-table.spec :as lts]
+            [com.kardashevtypev.solar.angles :as angles]))
 
 (defn approx=
   "Test if two numbers are approximately equal within tolerance."

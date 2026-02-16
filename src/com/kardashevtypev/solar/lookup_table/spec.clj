@@ -1,7 +1,7 @@
-(ns solar.lookup-table.spec
-  "Specs for solar.lookup-table namespace."
+(ns com.kardashevtypev.solar.lookup-table.spec
+  "Specs for com.kardashevtypev.solar.lookup-table namespace."
   (:require [clojure.spec.alpha :as s]
-            [solar.lookup-table :as lt]))
+            [com.kardashevtypev.solar.lookup-table :as lt]))
 
 ;;; ============================================================
 ;;; Config Specs

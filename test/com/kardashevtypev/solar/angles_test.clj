@@ -1,8 +1,8 @@
-(ns solar.angles-test
+(ns com.kardashevtypev.solar.angles-test
   (:require [clojure.test :refer [deftest is testing]]
             [clojure.spec.test.alpha :as stest]
-            [solar.angles :as a]
-            [solar.angles.spec]))
+            [com.kardashevtypev.solar.angles :as a]
+            [com.kardashevtypev.solar.angles.spec]))
 
 ;; Enable spec instrumentation for tests
 (stest/instrument)

@@ -9,21 +9,23 @@ Solar angle calculation library for computing optimal solar panel angles based o
 ## Project Status
 
 **Implemented:**
-- `solar.angles` — Core solar position and panel angle calculations (src/solar/angles.clj)
-- `solar.angles.spec` — Clojure specs for validation (src/solar/angles/spec.clj)
-- Comprehensive test suite (test/solar/angles_test.clj)
+- `com.kardashevtypev.solar.angles` — Core solar position and panel angle calculations (src/com/kardashevtypev/solar/angles.clj)
+- `com.kardashevtypev.solar.angles.spec` — Clojure specs for validation (src/com/kardashevtypev/solar/angles/spec.clj)
+- `com.kardashevtypev.solar.lookup-table` — Precomputed lookup tables for single-axis and dual-axis trackers (src/com/kardashevtypev/solar/lookup_table.clj)
+- `com.kardashevtypev.solar.lookup-table.spec` — Specs for lookup table config and structures (src/com/kardashevtypev/solar/lookup_table/spec.clj)
+- Comprehensive test suites (test/com/kardashevtypev/solar/angles_test.clj, test/com/kardashevtypev/solar/lookup_table_test.clj)
 
 **Design documents** in `dev/archnotes/`:
 - `solar-panel-angle-calculations.md` — Core solar position formulas (declination, hour angle, zenith, azimuth, equation of time) and panel angle calculations for all tracker types. Contains the reference Clojure implementation.
-- `solar-angle-lookup-tables.md` — Precomputed lookup table design for embedded/real-time use. Covers table structures, compact encodings (int16, delta, polynomial), interpolation, and storage budgets. Not yet implemented.
+- `solar-angle-lookup-tables.md` — Precomputed lookup table design for embedded/real-time use. Covers table structures, compact encodings (int16, delta, polynomial), interpolation, and storage budgets.
 
 ## Architecture (from design docs)
 
 **Calculation pipeline:** day-of-year → intermediate angle B → equation of time → local solar time → hour angle + declination → zenith/azimuth → panel angles
 
-**Key namespaces (planned):**
-- `solar.angles` — Core solar position and panel angle functions. Entry point is `solar-position` which returns a map with `:zenith`, `:altitude`, `:azimuth`, `:hour-angle`, `:declination`, etc.
-- `solar.lookup-table` — Precomputed angle tables indexed by `[day-of-year][interval]`. Depends on `solar.angles`.
+**Key namespaces:**
+- `com.kardashevtypev.solar.angles` — Core solar position and panel angle functions. Entry point is `solar-position` which returns a map with `:zenith`, `:altitude`, `:azimuth`, `:hour-angle`, `:declination`, etc.
+- `com.kardashevtypev.solar.lookup-table` — Precomputed angle tables indexed by `[day-of-year][interval]`. Depends on `com.kardashevtypev.solar.angles`.
 
 **Conventions:**
 - Angles in degrees (radians only internally for trig)

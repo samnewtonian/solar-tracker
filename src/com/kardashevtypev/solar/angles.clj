@@ -1,4 +1,4 @@
-(ns solar.angles
+(ns com.kardashevtypev.solar.angles
   "Solar panel angle calculations for single and dual-axis tracking systems.
    All angles in degrees unless otherwise noted."
   (:require [clojure.math :as math]))

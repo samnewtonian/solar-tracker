@@ -21,7 +21,7 @@ Written in Clojure. Uses standard solar position algorithms (NOAA / Duffie & Bec
 Add the dependency to your `deps.edn` (or clone the repo directly):
 
 ```clojure
-(require '[solar.angles :as sa])
+(require '[com.kardashevtypev.solar.angles :as sa])
 
 ;; Calculate solar position for Springfield, IL on March 21 at noon
 ;; (39.8°N, 89.6°W, Central Time std meridian -90°)
@@ -94,15 +94,20 @@ clj -X:test
 
 ```
 src/
-  solar/
-    angles.clj          # Core calculations
+  com/kardashevtypev/solar/
+    angles.clj              # Core calculations
     angles/
-      spec.clj          # Clojure specs for validation
+      spec.clj              # Clojure specs for angles
+    lookup_table.clj        # Precomputed lookup tables
+    lookup_table/
+      spec.clj              # Clojure specs for lookup tables
 test/
-  solar/
-    angles_test.clj     # Test suite
+  com/kardashevtypev/solar/
+    angles_test.clj         # Angles test suite
+    lookup_table_test.clj   # Lookup table test suite
 dev/
-  archnotes/            # Design documents
+  archnotes/                # Design documents
+doc/                        # Implementation notes
 ```
 
 ## References

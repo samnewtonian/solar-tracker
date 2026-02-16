@@ -1,8 +1,8 @@
-(ns solar.lookup-table
+(ns com.kardashevtypev.solar.lookup-table
   "Precomputed solar angle lookup table generation and access.
    Generates daylight-only tables for single-axis and dual-axis trackers
    with configurable interval and sunrise/sunset buffers."
-  (:require [solar.angles :as angles]
+  (:require [com.kardashevtypev.solar.angles :as angles]
             [clojure.math :as math]))
 
 ;;; ============================================================
@@ -258,6 +258,7 @@
          :panel-azimuth (interpolate-angle (:panel-azimuth before)
                                            (:panel-azimuth after)
                                            fraction)}))))
+
 ;;; ============================================================
 ;;; Compact Export
 ;;; ============================================================
