@@ -86,26 +86,41 @@ This correction ranges from approximately -14 to +16 minutes throughout the year
 
 ### Step 4: Calculate Local Solar Time (LST)
 
-Convert clock time to true solar time:
+Convert clock time to true solar time. **Using UTC is recommended** as it avoids DST complications entirely:
 
 ```
-LST = LT + (4 × (L_st - L_loc)) / 60 + E / 60
+LST = UTC_hours + (4 × L_loc) / 60 + E / 60
 ```
 
 Where:
-- `LT` = Local clock time in decimal hours (e.g., 2:30 PM = 14.5)
-- `L_st` = Standard meridian for local time zone (e.g., -90° for US Central)
-- `L_loc` = Local longitude (negative for West)
+- `UTC_hours` = Time in UTC as decimal hours (e.g., 7:30 PM UTC = 19.5)
+- `L_loc` = Local longitude in degrees (negative for West)
 - `E` = Equation of Time (minutes)
+
+Apply `mod 24` to handle day boundary wraparound.
+
+**Alternative using local standard time:**
+
+If working with local time instead of UTC:
+
+```
+LST = LT + (4 × (L_loc - L_st)) / 60 + E / 60
+```
+
+Where:
+- `LT` = Local standard time in decimal hours (subtract 1 hour if DST is in effect)
+- `L_st` = Standard meridian for local time zone
+- `L_loc` = Local longitude (negative for West)
 
 **Time Zone Standard Meridians:**
 | Time Zone | Standard Meridian |
 |-----------|-------------------|
-| US Eastern (EST/EDT) | -75° |
-| US Central (CST/CDT) | -90° |
-| US Mountain (MST/MDT) | -105° |
-| US Pacific (PST/PDT) | -120° |
-| UTC | 0° |
+| US Eastern (EST) | -75° |
+| US Central (CST) | -90° |
+| US Mountain (MST) | -105° |
+| US Pacific (PST) | -120° |
+
+**Note:** The UTC approach is preferred because DST handling moves to the system boundary, timestamps are typically stored in UTC anyway, and there's no ambiguity during DST transitions.
 
 ---
 
@@ -358,20 +373,21 @@ Optimal Tilt = 0.76 × 40 + 3.1 = 33.5°
           (* -0.040849 (math/sin (* 2 b)))))))
 
 (defn local-solar-time
-  "Calculate Local Solar Time from clock time.
+  "Calculate Local Solar Time from UTC.
    Inputs:
-     local-time     - Clock time in decimal hours (e.g., 14.5 for 2:30 PM)
-     std-meridian   - Standard meridian for time zone (degrees, negative for West)
+     utc-hours       - UTC time in decimal hours (e.g., 19.5 for 7:30 PM UTC)
      local-longitude - Observer's longitude (degrees, negative for West)
-     day-of-year    - Day number (1-365)
-   Output: Local solar time in decimal hours"
-  [local-time std-meridian local-longitude day-of-year]
+     day-of-year     - Day number (1-365)
+   Output: Local solar time in decimal hours
+   
+   Using UTC avoids DST complications entirely."
+  [utc-hours local-longitude day-of-year]
   (let [eot (equation-of-time day-of-year)
-        ;; Longitude correction: 4 minutes per degree difference
-        long-correction (/ (* 4.0 (- std-meridian local-longitude)) 60.0)
+        ;; Longitude correction: 4 minutes per degree from prime meridian
+        long-correction (/ (* 4.0 local-longitude) 60.0)
         ;; Equation of time correction (convert from minutes to hours)
         eot-correction (/ eot 60.0)]
-    (+ local-time long-correction eot-correction)))
+    (mod (+ utc-hours long-correction eot-correction) 24.0)))
 
 (defn hour-angle
   "Calculate the hour angle from local solar time.
@@ -467,9 +483,8 @@ Optimal Tilt = 0.76 × 40 + 3.1 = 33.5°
      year            - Calendar year
      month           - Month (1-12)
      day             - Day of month (1-31)
-     hour            - Hour in 24-hour format (0-23)
-     minute          - Minute (0-59)
-     std-meridian    - Standard meridian for time zone (degrees)
+     utc-hour        - Hour in UTC (0-23)
+     utc-minute      - Minute (0-59)
    
    Returns a map containing:
      :day-of-year    - Julian day number
@@ -480,11 +495,11 @@ Optimal Tilt = 0.76 × 40 + 3.1 = 33.5°
      :zenith         - Solar zenith angle (degrees)
      :altitude       - Solar altitude/elevation (degrees)
      :azimuth        - Solar azimuth (degrees, 0° = North)"
-  [latitude longitude year month day hour minute std-meridian]
+  [latitude longitude year month day utc-hour utc-minute]
   (let [n (day-of-year year month day)
-        local-time (+ hour (/ minute 60.0))
+        utc-hours (+ utc-hour (/ utc-minute 60.0))
         eot (equation-of-time n)
-        lst (local-solar-time local-time std-meridian longitude n)
+        lst (local-solar-time utc-hours longitude n)
         ha (hour-angle lst)
         decl (solar-declination n)
         zenith (solar-zenith-angle latitude decl ha)
@@ -562,24 +577,24 @@ Optimal Tilt = 0.76 × 40 + 3.1 = 33.5°
 (defn example-calculation
   "Demonstrate calculations for Springfield, IL on March 21 at solar noon.
    Springfield, IL: 39.8°N, 89.6°W
-   Central Time Zone standard meridian: -90°"
+   Solar noon is approximately 12:00 local solar time, which is ~18:00 UTC."
   []
   (let [;; Location: Springfield, IL
         latitude 39.8
         longitude -89.6
-        std-meridian -90.0
         
         ;; Date: March 21 (Spring Equinox)
         year 2026
         month 3
         day 21
         
-        ;; Time: approximately solar noon (accounting for longitude offset)
-        hour 12
-        minute 0
+        ;; Time: approximately solar noon in UTC
+        ;; Springfield is ~6 hours behind UTC, so noon local ≈ 18:00 UTC
+        utc-hour 18
+        utc-minute 0
         
         ;; Calculate solar position
-        pos (solar-position latitude longitude year month day hour minute std-meridian)
+        pos (solar-position latitude longitude year month day utc-hour utc-minute)
         
         ;; Calculate panel angles
         single-axis (single-axis-tilt pos latitude)
@@ -589,7 +604,7 @@ Optimal Tilt = 0.76 × 40 + 3.1 = 33.5°
     (println "=== Solar Position Calculation Example ===")
     (println (format "Location: Springfield, IL (%.1f°N, %.1f°W)" latitude (- longitude)))
     (println (format "Date: %d-%02d-%02d" year month day))
-    (println (format "Time: %02d:%02d local time" hour minute))
+    (println (format "Time: %02d:%02d UTC" utc-hour utc-minute))
     (println)
     (println "--- Solar Position ---")
     (println (format "Day of year: %d" (:day-of-year pos)))
@@ -618,15 +633,15 @@ Optimal Tilt = 0.76 × 40 + 3.1 = 33.5°
   ;; Run the example
   (example-calculation)
   
-  ;; Calculate position for a specific time
-  (solar-position 39.8 -89.6 2026 6 21 14 30 -90.0)
+  ;; Calculate position for a specific time (2:30 PM CDT = 19:30 UTC)
+  (solar-position 39.8 -89.6 2026 6 21 19 30)
   
   ;; Get dual-axis angles
-  (-> (solar-position 39.8 -89.6 2026 6 21 14 30 -90.0)
+  (-> (solar-position 39.8 -89.6 2026 6 21 19 30)
       (dual-axis-angles))
   
-  ;; Calculate for summer solstice at noon
-  (let [pos (solar-position 39.8 -89.6 2026 6 21 12 0 -90.0)]
+  ;; Calculate for summer solstice at solar noon (~18:00 UTC for Central IL)
+  (let [pos (solar-position 39.8 -89.6 2026 6 21 18 0)]
     {:zenith (:zenith pos)
      :summer-tilt (seasonal-tilt-adjustment 39.8 :summer)})
   )
@@ -638,7 +653,7 @@ Optimal Tilt = 0.76 × 40 + 3.1 = 33.5°
 
 **Location:** Springfield, IL (39.8°N, 89.6°W)  
 **Date:** March 21, 2026 (Spring Equinox)  
-**Time:** Solar Noon (approximately 12:00 local time)
+**Time:** Solar Noon (~18:00 UTC)
 
 ### Step-by-Step Calculation
 
@@ -654,9 +669,10 @@ Optimal Tilt = 0.76 × 40 + 3.1 = 33.5°
    E ≈ -7.5 minutes (mid-March)
    ```
 
-4. **Local Solar Time:**
+4. **Local Solar Time (from UTC):**
    ```
-   LST = 12 + (4 × (-90 - (-89.6))) / 60 + (-7.5) / 60
+   LST = 18.0 + (4 × (-89.6)) / 60 + (-7.5) / 60
+   LST = 18.0 - 5.97 - 0.125
    LST ≈ 11.9 hours
    ```
 

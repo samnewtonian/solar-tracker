@@ -79,6 +79,15 @@ The sun moves at different apparent speeds throughout the day:
 
 ## Table Structure Design
 
+### Time Representation
+
+**All times in the lookup table use UTC.** This avoids DST complications entirely—the conversion from local clock time to UTC happens once at the system boundary (typically when reading the real-time clock), and all internal lookups use consistent UTC indices.
+
+For a tracker in Central Illinois:
+- Local noon ≈ 18:00 UTC (1080 minutes)
+- Local 6 AM ≈ 12:00 UTC (720 minutes)
+- Local 6 PM ≈ 00:00 UTC next day (1440 minutes)
+
 ### Single-Axis Tracker
 
 Stores one value per interval: tracker rotation angle.
@@ -292,7 +301,6 @@ For nighttime intervals, options include:
   {:interval-minutes 5
    :latitude 39.8
    :longitude -89.6
-   :std-meridian -90.0
    :year 2026
    :include-night? false
    :sunrise-buffer-minutes 30   ; Start tracking before sunrise
@@ -359,45 +367,55 @@ For nighttime intervals, options include:
 (defn generate-day-angles
   "Generate angle entries for a single day.
    
+   Note: Times are stored as minutes-since-midnight in UTC.
+   
    Returns vector of maps, one per interval:
-   {:minutes <minutes-since-midnight>
+   {:minutes <minutes-since-midnight-utc>
     :zenith <zenith-angle>
     :azimuth <azimuth-angle>
     :altitude <altitude-angle>
     :single-axis-rotation <rotation-for-single-axis>
     :dual-axis {:tilt <tilt> :panel-azimuth <panel-azimuth>}
     :is-daylight? <boolean>}"
-  [{:keys [interval-minutes latitude longitude std-meridian year
+  [{:keys [interval-minutes latitude longitude year
            include-night? sunrise-buffer-minutes sunset-buffer-minutes]
     :as config}
    day-of-year]
   (let [n-intervals (intervals-per-day interval-minutes)
         {:keys [sunrise sunset]} (estimate-sunrise-sunset latitude day-of-year)
         
+        ;; Convert local sunrise/sunset to approximate UTC offset
+        ;; For Central IL (longitude -89.6°), offset is roughly +6 hours
+        utc-offset-minutes (int (* (/ (- longitude) 15.0) 60))
+        sunrise-utc (+ sunrise utc-offset-minutes)
+        sunset-utc (+ sunset utc-offset-minutes)
+        
         ;; Determine which month/day this is (approximate, for API)
-        ;; This is a simplification; production code would use proper date math
         month (inc (quot day-of-year 30))
         day-of-month (inc (mod day-of-year 30))
         
         start-minute (if include-night?
                        0
-                       (max 0 (- sunrise sunrise-buffer-minutes)))
+                       (max 0 (- sunrise-utc sunrise-buffer-minutes)))
         end-minute (if include-night?
                      1440
-                     (min 1440 (+ sunset sunset-buffer-minutes)))]
+                     (min 1440 (+ sunset-utc sunset-buffer-minutes)))]
     
     (vec
      (for [interval (range n-intervals)
-           :let [minutes (* interval interval-minutes)
-                 [hour minute] (minutes->time minutes)]
+           :let [utc-minutes (* interval interval-minutes)
+                 [utc-hour utc-minute] (minutes->time utc-minutes)
+                 ;; Approximate local minutes for daylight check
+                 local-minutes (- utc-minutes utc-offset-minutes)]
            :when (or include-night?
-                     (and (>= minutes start-minute)
-                          (<= minutes end-minute)))]
+                     (and (>= utc-minutes start-minute)
+                          (<= utc-minutes end-minute)))]
        (let [pos (angles/solar-position latitude longitude year
                                         month day-of-month
-                                        hour minute std-meridian)
-             is-daylight? (and (>= minutes sunrise) (<= minutes sunset))]
-         {:minutes minutes
+                                        utc-hour utc-minute)
+             is-daylight? (and (>= local-minutes sunrise) 
+                               (<= local-minutes sunset))]
+         {:minutes utc-minutes
           :zenith (:zenith pos)
           :azimuth (:azimuth pos)
           :altitude (:altitude pos)
@@ -453,17 +471,17 @@ For nighttime intervals, options include:
    Inputs:
      table       - Result from generate-year-table
      day-of-year - Day (1-365)
-     minutes     - Minutes since midnight
+     utc-minutes - Minutes since midnight UTC
    
    Returns interpolated angle data or nil if outside table range."
-  [{:keys [config days]} day-of-year minutes]
+  [{:keys [config days]} day-of-year utc-minutes]
   (let [{:keys [interval-minutes]} config
         day-entries (get days (dec day-of-year))
         
         ;; Find bracketing entries
         entry-minutes (map :minutes day-entries)
         idx-before (last (keep-indexed
-                          (fn [i m] (when (<= m minutes) i))
+                          (fn [i m] (when (<= m utc-minutes) i))
                           entry-minutes))]
     
     (when idx-before
@@ -475,14 +493,14 @@ For nighttime intervals, options include:
             t1 (if entry-after
                  (:minutes entry-after)
                  (+ t0 interval-minutes))
-            fraction (/ (- minutes t0) (- t1 t0))]
+            fraction (/ (- utc-minutes t0) (- t1 t0))]
         
         (if (or (nil? entry-after) (< fraction 0.01))
           ;; Use entry-before directly
           entry-before
           
           ;; Interpolate
-          {:minutes minutes
+          {:minutes utc-minutes
            :zenith (+ (:zenith entry-before)
                       (* fraction (- (:zenith entry-after)
                                      (:zenith entry-before))))
@@ -551,16 +569,17 @@ For nighttime intervals, options include:
     (println (format "Estimated storage: %.1f KB" storage-estimate-kb))
     (println)
     
-    ;; Example lookups
-    (println "Example lookups for Springfield, IL:")
+    ;; Example lookups (times in UTC)
+    ;; For Springfield, IL: local noon ≈ 18:00 UTC (1080 minutes)
+    (println "Example lookups for Springfield, IL (times in UTC):")
     (println)
     
-    (doseq [[label doy minutes] [["Spring equinox noon" 80 720]
-                                  ["Summer solstice 2pm" 172 840]
-                                  ["Winter solstice 10am" 355 600]]]
-      (let [result (lookup-angles table doy minutes)]
-        (println (format "%s (day %d, %02d:%02d):"
-                         label doy (quot minutes 60) (mod minutes 60)))
+    (doseq [[label doy utc-minutes] [["Spring equinox noon" 80 1080]
+                                      ["Summer solstice 2pm local" 172 1200]
+                                      ["Winter solstice 10am local" 355 960]]]
+      (let [result (lookup-angles table doy utc-minutes)]
+        (println (format "%s (day %d, %02d:%02d UTC):"
+                         label doy (quot utc-minutes 60) (mod utc-minutes 60)))
         (println (format "  Zenith: %.1f°  Azimuth: %.1f°  Altitude: %.1f°"
                          (:zenith result) (:azimuth result) (:altitude result)))
         (when-let [sa (:single-axis-rotation result)]
@@ -577,8 +596,8 @@ For nighttime intervals, options include:
   ;; Generate full year table
   (def my-table (example-table-generation))
   
-  ;; Look up specific time
-  (lookup-angles my-table 172 720)  ; Summer solstice noon
+  ;; Look up specific time (summer solstice solar noon ≈ 18:00 UTC)
+  (lookup-angles my-table 172 1080)
   
   ;; Export compact format
   (def compact (table->compact-dual-axis my-table))
