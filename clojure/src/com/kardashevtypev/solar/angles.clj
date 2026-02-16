@@ -143,11 +143,10 @@
      latitude    - Observer's latitude in degrees
      declination - Solar declination in degrees
      hour-angle  - Hour angle in degrees
-     zenith-angle - Solar zenith angle in degrees
    Output: azimuth in degrees (0° = North, 90° = East, 180° = South, 270° = West)
 
    Uses the robust atan2-based formula to avoid quadrant ambiguity."
-  [latitude declination hour-angle zenith-angle]
+  [latitude declination hour-angle]
   (let [lat-rad (deg->rad latitude)
         dec-rad (deg->rad declination)
         ha-rad (deg->rad hour-angle)
@@ -197,7 +196,7 @@
         decl (solar-declination n)
         zenith (solar-zenith-angle latitude decl ha)
         alt (solar-altitude zenith)
-        azim (solar-azimuth latitude decl ha zenith)]
+        azim (solar-azimuth latitude decl ha)]
     {:day-of-year n
      :declination decl
      :equation-of-time eot
