@@ -324,11 +324,17 @@ class TestAzimuthAlwaysNormalized:
         assert 0.0 <= pos.azimuth < 360.0
 
 
+class TestNaiveDatetimeRejected:
+    def test_raises_value_error(self):
+        with pytest.raises(ValueError, match="timezone-aware"):
+            solar_position(39.8, -89.6, datetime(2026, 3, 21, 12, 0))
+
+
 class TestEquationOfTimeBounded:
     def test_all_days(self):
-        for n in range(1, 366):
-            from solar_tracker.angles import equation_of_time
+        from solar_tracker.angles import equation_of_time
 
+        for n in range(1, 366):
             eot = equation_of_time(n)
             assert -15.0 <= eot <= 17.0, f"Day {n}: {eot}"
 

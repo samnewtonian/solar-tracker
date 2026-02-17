@@ -150,7 +150,8 @@ def _generate_table(
         start_minute = max(0, sunrise_utc - config.sunrise_buffer_minutes)
         end_minute = min(1439, sunset_utc + config.sunset_buffer_minutes)
 
-        first_interval = start_minute // config.interval_minutes
+        # Ceiling division: first entry must be >= start_minute
+        first_interval = -(-start_minute // config.interval_minutes)
         last_interval = min(end_minute // config.interval_minutes, n_intervals - 1)
 
         entries = []
