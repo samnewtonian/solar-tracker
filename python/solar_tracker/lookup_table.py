@@ -2,10 +2,12 @@
 
 Generates daylight-only tables for single-axis and dual-axis trackers
 with configurable interval and sunrise/sunset buffers.
+Tables are indexed by UTC minutes.
 """
 
 import datetime
 import math
+from types import SimpleNamespace
 from typing import Callable
 
 from . import angles
@@ -39,10 +41,8 @@ def intervals_per_day(interval_minutes: int) -> int:
 
 def doy_to_month_day(year: int, doy: int) -> tuple[int, int]:
     """Convert day-of-year to (month, day) for a given year."""
-    leap = (year % 400 == 0) or (year % 4 == 0 and year % 100 != 0)
-    days_in_months = [31, 29 if leap else 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
     remaining = doy
-    for month_idx, dim in enumerate(days_in_months):
+    for month_idx, dim in enumerate(angles.days_in_months(year)):
         if remaining <= dim:
             return (month_idx + 1, remaining)
         remaining -= dim
@@ -52,7 +52,7 @@ def doy_to_month_day(year: int, doy: int) -> tuple[int, int]:
 def estimate_sunrise_sunset(latitude: float, day_of_year: int) -> SunriseSunset:
     """Estimate sunrise and sunset times for a given day.
 
-    Returns SunriseSunset with sunrise/sunset as minutes from midnight.
+    Returns SunriseSunset with sunrise/sunset as minutes from midnight (local solar time).
     Uses the hour angle at sunrise/sunset formula: cos(h) = -tan(lat) * tan(decl)
     """
     lat_rad = angles.deg_to_rad(latitude)
@@ -101,39 +101,68 @@ def _interpolate_linear(
     return v1 + fraction * (v2 - v1)
 
 
+def _compute_angles_fast(sin_lat, cos_lat, sin_dec, cos_dec, correction, utc_hours):
+    """Compute solar angles using precomputed trig values for table generation."""
+    lst = (utc_hours + correction) % 24.0
+    ha = angles.DEGREES_PER_HOUR * (lst - 12.0)
+    ha_rad = angles.deg_to_rad(ha)
+    cos_z = sin_lat * sin_dec + cos_lat * cos_dec * math.cos(ha_rad)
+    zenith = angles.rad_to_deg(math.acos(max(-1.0, min(1.0, cos_z))))
+    sin_az = -1.0 * cos_dec * math.sin(ha_rad)
+    cos_az = sin_dec * cos_lat - cos_dec * sin_lat * math.cos(ha_rad)
+    azim = angles.normalize_angle(angles.rad_to_deg(math.atan2(sin_az, cos_az)))
+    return SimpleNamespace(
+        local_solar_time=lst,
+        hour_angle=ha,
+        zenith=zenith,
+        altitude=90.0 - zenith,
+        azimuth=azim,
+    )
+
+
 def _generate_table(
     config: LookupTableConfig,
     entry_fn: Callable,
     bytes_per_entry: int,
 ) -> LookupTable:
-    """Shared table generation."""
+    """Shared table generation with UTC-indexed minutes."""
     n_intervals = intervals_per_day(config.interval_minutes)
+    n_days = 366 if angles.leap_year(config.year) else 365
     days: list[DayData] = []
 
-    for doy in range(1, 366):
-        ss = estimate_sunrise_sunset(config.latitude, doy)
-        start_minute = max(0, ss.sunrise - config.sunrise_buffer_minutes)
-        end_minute = min(1439, ss.sunset + config.sunset_buffer_minutes)
-        month, day_of_month = doy_to_month_day(config.year, doy)
+    lat_rad = angles.deg_to_rad(config.latitude)
+    sin_lat = math.sin(lat_rad)
+    cos_lat = math.cos(lat_rad)
 
-        first_interval = start_minute // config.interval_minutes
+    for doy in range(1, n_days + 1):
+        ss = estimate_sunrise_sunset(config.latitude, doy)
+        eot = angles.equation_of_time(doy)
+        decl = angles.solar_declination(doy)
+        dec_rad = angles.deg_to_rad(decl)
+        sin_dec = math.sin(dec_rad)
+        cos_dec = math.cos(dec_rad)
+        correction = angles.utc_lst_correction(config.longitude, eot)
+        correction_minutes = correction * 60.0
+
+        sunrise_utc = int(ss.sunrise - correction_minutes)
+        sunset_utc = int(ss.sunset - correction_minutes)
+
+        start_minute = max(0, sunrise_utc - config.sunrise_buffer_minutes)
+        end_minute = min(1439, sunset_utc + config.sunset_buffer_minutes)
+
+        # Ceiling division: first entry must be >= start_minute
+        first_interval = -(-start_minute // config.interval_minutes)
         last_interval = min(end_minute // config.interval_minutes, n_intervals - 1)
 
         entries = []
         for interval in range(first_interval, last_interval + 1):
             minutes = interval * config.interval_minutes
-            hour, minute = minutes_to_time(minutes)
-            pos = angles.solar_position(
-                config.latitude,
-                config.longitude,
-                config.year,
-                month,
-                day_of_month,
-                hour,
-                minute,
-                config.std_meridian,
+            utc_hours = minutes / 60.0
+            pos = _compute_angles_fast(
+                sin_lat, cos_lat, sin_dec, cos_dec, correction, utc_hours
             )
-            is_daylight = minutes >= ss.sunrise and minutes <= ss.sunset
+            local_minutes = int(minutes + correction_minutes)
+            is_daylight = ss.sunrise <= local_minutes <= ss.sunset
             entries.append(entry_fn(minutes, pos, is_daylight))
 
         days.append(

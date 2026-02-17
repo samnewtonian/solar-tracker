@@ -4,6 +4,7 @@ All angles in degrees unless otherwise noted.
 """
 
 import math
+from datetime import datetime as DateTime, timezone
 
 from ._types import DualAxisAngles, Season, SolarPosition
 
@@ -26,11 +27,19 @@ def normalize_angle(angle: float) -> float:
     return angle % 360.0
 
 
+def leap_year(year: int) -> bool:
+    """Returns True if year is a leap year."""
+    return (year % 400 == 0) or (year % 4 == 0 and year % 100 != 0)
+
+
+def days_in_months(year: int) -> list[int]:
+    """Returns a list of days per month for the given year."""
+    return [31, 29 if leap_year(year) else 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
+
+
 def day_of_year(year: int, month: int, day: int) -> int:
     """Calculate day of year (1-366) from year, month, day."""
-    leap = (year % 400 == 0) or (year % 4 == 0 and year % 100 != 0)
-    days_in_months = [31, 29 if leap else 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
-    return sum(days_in_months[: month - 1]) + day
+    return sum(days_in_months(year)[: month - 1]) + day
 
 
 def intermediate_angle_b(n: int) -> float:
@@ -58,24 +67,17 @@ def equation_of_time(n: int) -> float:
     )
 
 
-def local_solar_time(
-    local_time: float, std_meridian: float, longitude: float, n: int
-) -> float:
-    """Calculate Local Solar Time from clock time.
+def utc_lst_correction(longitude: float, eot: float) -> float:
+    """Calculate the UTC-to-local-solar-time correction in hours.
 
     Args:
-        local_time: Clock time in decimal hours (e.g., 14.5 for 2:30 PM)
-        std_meridian: Standard meridian for time zone (degrees, negative for West)
         longitude: Observer's longitude (degrees, negative for West)
-        n: Day number (1-365)
+        eot: Equation of time in minutes
 
     Returns:
-        Local solar time in decimal hours
+        Correction in hours to add to UTC to get local solar time
     """
-    eot = equation_of_time(n)
-    long_correction = (4.0 * (std_meridian - longitude)) / 60.0
-    eot_correction = eot / 60.0
-    return local_time + long_correction + eot_correction
+    return (4.0 * longitude + eot) / 60.0
 
 
 def hour_angle(local_solar_time: float) -> float:
@@ -142,33 +144,42 @@ def solar_azimuth(
     return normalize_angle(rad_to_deg(az_rad))
 
 
-def solar_position(
-    latitude: float,
-    longitude: float,
-    year: int,
-    month: int,
-    day: int,
-    hour: int,
-    minute: int,
-    std_meridian: float,
-) -> SolarPosition:
-    """Calculate complete solar position for given location, date, and time."""
-    n = day_of_year(year, month, day)
-    local_time = hour + minute / 60.0
-    eot = equation_of_time(n)
-    lst = local_solar_time(local_time, std_meridian, longitude, n)
+def solar_angles_at(
+    latitude: float, decl: float, correction: float, utc_hours: float
+) -> tuple[float, float, float, float, float]:
+    """Compute solar angles from precomputed correction and UTC hours.
+
+    Returns:
+        (local_solar_time, hour_angle, zenith, altitude, azimuth)
+    """
+    lst = (utc_hours + correction) % 24.0
     ha = hour_angle(lst)
-    decl = solar_declination(n)
-    zenith = solar_zenith_angle(latitude, decl, ha)
-    alt = solar_altitude(zenith)
+    z = solar_zenith_angle(latitude, decl, ha)
+    alt = solar_altitude(z)
     azim = solar_azimuth(latitude, decl, ha)
+    return lst, ha, z, alt, azim
+
+
+def solar_position(
+    latitude: float, longitude: float, dt: DateTime
+) -> SolarPosition:
+    """Calculate complete solar position for given location and timezone-aware datetime."""
+    if dt.tzinfo is None:
+        raise ValueError("dt must be timezone-aware")
+    utc = dt.astimezone(timezone.utc)
+    utc_hours = utc.hour + utc.minute / 60.0 + utc.second / 3600.0
+    n = day_of_year(utc.year, utc.month, utc.day)
+    eot = equation_of_time(n)
+    decl = solar_declination(n)
+    correction = utc_lst_correction(longitude, eot)
+    lst, ha, z, alt, azim = solar_angles_at(latitude, decl, correction, utc_hours)
     return SolarPosition(
         day_of_year=n,
         declination=decl,
         equation_of_time=eot,
         local_solar_time=lst,
         hour_angle=ha,
-        zenith=zenith,
+        zenith=z,
         altitude=alt,
         azimuth=azim,
     )
@@ -218,24 +229,21 @@ def seasonal_tilt_adjustment(latitude: float, season: Season) -> float:
 
 def example_calculation() -> dict:
     """Demonstrate calculations for Springfield, IL on March 21 at solar noon."""
+    from zoneinfo import ZoneInfo
+
     latitude = 39.8
     longitude = -89.6
-    std_meridian = -90.0
-    year = 2026
-    month = 3
-    day = 21
-    hour = 12
-    minute = 0
 
-    pos = solar_position(latitude, longitude, year, month, day, hour, minute, std_meridian)
+    dt = DateTime(2026, 3, 21, 12, 0, tzinfo=ZoneInfo("America/Chicago"))
+
+    pos = solar_position(latitude, longitude, dt)
     sa = single_axis_tilt(pos, latitude)
     da = dual_axis_angles(pos)
     fixed_annual = optimal_fixed_tilt(latitude)
 
     print("=== Solar Position Calculation Example ===")
     print(f"Location: Springfield, IL ({latitude:.1f}°N, {-longitude:.1f}°W)")
-    print(f"Date: {year}-{month:02d}-{day:02d}")
-    print(f"Time: {hour:02d}:{minute:02d} local time")
+    print(f"Date/Time: {dt}")
     print()
     print("--- Solar Position ---")
     print(f"Day of year: {pos.day_of_year}")
