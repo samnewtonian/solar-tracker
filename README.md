@@ -223,6 +223,6 @@ cd rust && cargo test
 
 ## License
 
-Copyright 2026
+Copyright 2026 Kardashev Type V
 
 Licensed under the Apache License, Version 2.0
