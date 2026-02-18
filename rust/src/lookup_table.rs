@@ -3,7 +3,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use crate::angles;
 use crate::types::{
     DayData, DualAxisEntry, DualAxisTable, LookupTable, LookupTableConfig, SingleAxisEntry,
-    SingleAxisTable, SunriseSunset, TableMetadata,
+    SingleAxisTable, SolarPosition, SunriseSunset, TableMetadata,
 };
 
 pub fn minutes_to_time(total_minutes: i32) -> (i32, i32) {
@@ -18,19 +18,14 @@ pub fn intervals_per_day(interval_minutes: i32) -> i32 {
     1440 / interval_minutes
 }
 
-pub fn doy_to_month_day(year: i32, doy: i32) -> (i32, i32) {
-    let leap = (year % 400 == 0) || (year % 4 == 0 && year % 100 != 0);
-    let days_in_months = [
-        31,
-        if leap { 29 } else { 28 },
-        31, 30, 31, 30, 31, 31, 30, 31, 30, 31,
-    ];
-    let mut remaining = doy;
-    for (month_idx, &dim) in days_in_months.iter().enumerate() {
-        if remaining <= dim {
-            return (month_idx as i32 + 1, remaining);
+pub fn doy_to_month_day(year: i32, doy: i32) -> (u32, u32) {
+    let dim = angles::days_in_months(year);
+    let mut remaining = doy as u32;
+    for (month_idx, &d) in dim.iter().enumerate() {
+        if remaining <= d {
+            return (month_idx as u32 + 1, remaining);
         }
-        remaining -= dim;
+        remaining -= d;
     }
     (12, 31)
 }
@@ -125,38 +120,80 @@ fn find_bracketing_entries<E: HasMinutes>(
     Some((entry_before, entry_after, fraction))
 }
 
+fn compute_angles_fast(
+    sin_lat: f64,
+    cos_lat: f64,
+    sin_dec: f64,
+    cos_dec: f64,
+    correction: f64,
+    utc_hours: f64,
+) -> SolarPosition {
+    let lst = (utc_hours + correction).rem_euclid(24.0);
+    let ha = angles::DEGREES_PER_HOUR * (lst - 12.0);
+    let ha_rad = angles::deg_to_rad(ha);
+    let cos_z = sin_lat * sin_dec + cos_lat * cos_dec * ha_rad.cos();
+    let zenith = angles::rad_to_deg(cos_z.clamp(-1.0, 1.0).acos());
+    let sin_az = -cos_dec * ha_rad.sin();
+    let cos_az = sin_dec * cos_lat - cos_dec * sin_lat * ha_rad.cos();
+    let azim = angles::normalize_angle(angles::rad_to_deg(sin_az.atan2(cos_az)));
+    SolarPosition {
+        day_of_year: 0,
+        declination: 0.0,
+        equation_of_time: 0.0,
+        local_solar_time: lst,
+        hour_angle: ha,
+        zenith,
+        altitude: 90.0 - zenith,
+        azimuth: azim,
+    }
+}
+
 fn generate_table<E, F>(config: &LookupTableConfig, entry_fn: F, bytes_per_entry: usize) -> LookupTable<E>
 where
-    F: Fn(i32, &crate::types::SolarPosition, bool) -> E,
+    F: Fn(i32, &SolarPosition, bool) -> E,
 {
     let n_intervals = intervals_per_day(config.interval_minutes);
-    let mut days: Vec<DayData<E>> = Vec::with_capacity(365);
+    let n_days = if angles::leap_year(config.year) { 366 } else { 365 };
+    let mut days: Vec<DayData<E>> = Vec::with_capacity(n_days as usize);
 
-    for doy in 1..=365 {
+    let lat_rad = angles::deg_to_rad(config.latitude);
+    let sin_lat = lat_rad.sin();
+    let cos_lat = lat_rad.cos();
+
+    for doy in 1..=n_days {
         let ss = estimate_sunrise_sunset(config.latitude, doy);
-        let start_minute = (ss.sunrise - config.sunrise_buffer_minutes).max(0);
-        let end_minute = (ss.sunset + config.sunset_buffer_minutes).min(1439);
-        let (month, day_of_month) = doy_to_month_day(config.year, doy);
+        let eot = angles::equation_of_time(doy);
+        let decl = angles::solar_declination(doy);
+        let dec_rad = angles::deg_to_rad(decl);
+        let sin_dec = dec_rad.sin();
+        let cos_dec = dec_rad.cos();
+        let correction = angles::utc_lst_correction(config.longitude, eot);
+        let correction_minutes = correction * 60.0;
 
-        let first_interval = start_minute / config.interval_minutes;
+        let sunrise_utc = (ss.sunrise as f64 - correction_minutes) as i32;
+        let sunset_utc = (ss.sunset as f64 - correction_minutes) as i32;
+
+        let start_minute = 0.max(sunrise_utc - config.sunrise_buffer_minutes);
+        let end_minute = 1439.min(sunset_utc + config.sunset_buffer_minutes);
+
+        // Ceiling division for first interval
+        let first_interval = (start_minute + config.interval_minutes - 1) / config.interval_minutes;
         let last_interval = (end_minute / config.interval_minutes).min(n_intervals - 1);
 
-        let capacity = (last_interval - first_interval + 1) as usize;
+        let capacity = if last_interval >= first_interval {
+            (last_interval - first_interval + 1) as usize
+        } else {
+            0
+        };
         let mut entries = Vec::with_capacity(capacity);
         for interval in first_interval..=last_interval {
             let mins = interval * config.interval_minutes;
-            let (hour, minute) = minutes_to_time(mins);
-            let pos = angles::solar_position(
-                config.latitude,
-                config.longitude,
-                config.year,
-                month,
-                day_of_month,
-                hour,
-                minute,
-                config.std_meridian,
+            let utc_hours = mins as f64 / 60.0;
+            let pos = compute_angles_fast(
+                sin_lat, cos_lat, sin_dec, cos_dec, correction, utc_hours,
             );
-            let is_daylight = mins >= ss.sunrise && mins <= ss.sunset;
+            let local_minutes = (mins as f64 + correction_minutes) as i32;
+            let is_daylight = local_minutes >= ss.sunrise && local_minutes <= ss.sunset;
             entries.push(entry_fn(mins, &pos, is_daylight));
         }
 
