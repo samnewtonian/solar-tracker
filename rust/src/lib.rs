@@ -3,11 +3,11 @@ pub mod lookup_table;
 pub mod types;
 
 pub use angles::{
-    day_of_year, days_in_months, deg_to_rad, dual_axis_angles, equation_of_time,
-    example_calculation, hour_angle, intermediate_angle_b, leap_year, normalize_angle,
-    optimal_fixed_tilt, rad_to_deg, seasonal_tilt_adjustment, single_axis_tilt, solar_altitude,
-    solar_angles_at, solar_azimuth, solar_declination, solar_position, solar_zenith_angle,
-    utc_lst_correction, DEGREES_PER_HOUR, EARTH_AXIAL_TILT,
+    day_of_year, days_in_months, deg_to_rad, dual_axis_angles, equation_of_time, hour_angle,
+    intermediate_angle_b, leap_year, normalize_angle, optimal_fixed_tilt, rad_to_deg,
+    seasonal_tilt_adjustment, single_axis_tilt, solar_altitude, solar_angles_at, solar_azimuth,
+    solar_declination, solar_position, solar_zenith_angle, utc_lst_correction, DEGREES_PER_HOUR,
+    EARTH_AXIAL_TILT,
 };
 
 pub use lookup_table::{
@@ -18,7 +18,6 @@ pub use lookup_table::{
 };
 
 pub use types::{
-    DayData, DualAxisAngles, DualAxisEntry, DualAxisTable, ExampleResult, LookupTable,
-    LookupTableConfig, Season, SingleAxisEntry, SingleAxisTable, SolarPosition, SunriseSunset,
-    TableMetadata,
+    DayData, DualAxisAngles, DualAxisEntry, DualAxisTable, LookupTable, LookupTableConfig, Season,
+    SingleAxisEntry, SingleAxisTable, SolarPosition, SunriseSunset, TableMetadata,
 };

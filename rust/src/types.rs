@@ -90,11 +90,3 @@ pub struct LookupTable<E> {
 
 pub type SingleAxisTable = LookupTable<SingleAxisEntry>;
 pub type DualAxisTable = LookupTable<DualAxisEntry>;
-
-#[derive(Debug, Clone, PartialEq)]
-pub struct ExampleResult {
-    pub solar_position: SolarPosition,
-    pub single_axis_rotation: f64,
-    pub dual_axis: DualAxisAngles,
-    pub fixed_optimal_tilt: f64,
-}

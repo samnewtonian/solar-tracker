@@ -280,15 +280,6 @@ fn test_seasonal_tilt_equator() {
     assert_approx!(seasonal_tilt_adjustment(0.0, Season::Spring), 0.0, 0.01);
 }
 
-// ── ExampleCalculation ──
-
-#[test]
-fn test_example_calculation_runs() {
-    let result = example_calculation();
-    assert!(result.solar_position.day_of_year > 0);
-    assert!(result.fixed_optimal_tilt > 0.0);
-}
-
 // ── HourAngle ──
 
 #[test]

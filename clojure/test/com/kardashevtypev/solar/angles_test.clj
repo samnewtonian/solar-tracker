@@ -174,15 +174,6 @@
       (is (approx= 40.0 (a/seasonal-tilt-adjustment lat :fall) 0.1)
           "Fall: latitude"))))
 
-(deftest example-calculation-test
-  (testing "Example calculation runs without errors"
-    (let [result (a/example-calculation)]
-      (is (map? result) "Returns a map")
-      (is (contains? result :solar-position) "Contains solar position")
-      (is (contains? result :single-axis-rotation) "Contains single-axis rotation")
-      (is (contains? result :dual-axis) "Contains dual-axis angles")
-      (is (contains? result :fixed-optimal-tilt) "Contains fixed tilt"))))
-
 (deftest hour-angle-properties-test
   (testing "Hour angle properties"
     ;; At solar noon (LST = 12), hour angle = 0
