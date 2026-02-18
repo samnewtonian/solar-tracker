@@ -273,81 +273,9 @@
      season   - One of :summer, :winter, :spring, :fall
    Output: recommended tilt angle in degrees"
   [latitude season]
-  (case season
-    :summer (- (abs latitude) 15.0)
-    :winter (+ (abs latitude) 15.0)
-    (:spring :fall) (abs latitude)))
+  (let [abs-lat (abs latitude)]
+    (case season
+      :summer (- abs-lat 15.0)
+      :winter (+ abs-lat 15.0)
+      (:spring :fall) abs-lat)))
 
-;;; ============================================================
-;;; Example Usage and Demonstration
-;;; ============================================================
-
-(defn example-calculation
-  "Demonstrate calculations for Springfield, IL on March 21 at solar noon.
-   Springfield, IL: 39.8°N, 89.6°W
-   Central Time Zone: America/Chicago (UTC-6)"
-  []
-  (let [;; Location: Springfield, IL
-        latitude 39.8
-        longitude -89.6
-
-        ;; Date/time: March 21 noon Central Time
-        datetime (ZonedDateTime/of 2026 3 21 12 0 0 0 (java.time.ZoneId/of "America/Chicago"))
-
-        ;; Calculate solar position
-        pos (solar-position latitude longitude datetime)
-
-        ;; Calculate panel angles
-        single-axis (single-axis-tilt pos latitude)
-        dual-axis (dual-axis-angles pos)
-        fixed-annual (optimal-fixed-tilt latitude)]
-
-    (println "=== Solar Position Calculation Example ===")
-    (println (format "Location: Springfield, IL (%.1f°N, %.1f°W)" latitude (- longitude)))
-    (println (format "Datetime: %s" datetime))
-    (println)
-    (println "--- Solar Position ---")
-    (println (format "Day of year: %d" (:day-of-year pos)))
-    (println (format "Declination: %.2f°" (:declination pos)))
-    (println (format "Equation of Time: %.2f minutes" (:equation-of-time pos)))
-    (println (format "Local Solar Time: %.2f hours" (:local-solar-time pos)))
-    (println (format "Hour Angle: %.2f°" (:hour-angle pos)))
-    (println (format "Zenith Angle: %.2f°" (:zenith pos)))
-    (println (format "Altitude: %.2f°" (:altitude pos)))
-    (println (format "Azimuth: %.2f° (0°=N, 90°=E, 180°=S)" (:azimuth pos)))
-    (println)
-    (println "--- Optimal Panel Angles ---")
-    (println (format "Single-axis tracker rotation: %.2f°" single-axis))
-    (println (format "Dual-axis tilt: %.2f°" (:tilt dual-axis)))
-    (println (format "Dual-axis panel azimuth: %.2f°" (:panel-azimuth dual-axis)))
-    (println (format "Fixed annual optimal tilt: %.1f°" fixed-annual))
-    (println)
-
-    ;; Return the data for programmatic use
-    {:solar-position pos
-     :single-axis-rotation single-axis
-     :dual-axis dual-axis
-     :fixed-optimal-tilt fixed-annual}))
-
-(comment
-  ;; Run the example
-  (example-calculation)
-
-  ;; Calculate position for a specific time
-  (solar-position 39.8 -89.6
-                  (ZonedDateTime/of 2026 6 21 14 30 0 0
-                                    (java.time.ZoneId/of "America/Chicago")))
-
-  ;; Get dual-axis angles
-  (-> (solar-position 39.8 -89.6
-                      (ZonedDateTime/of 2026 6 21 14 30 0 0
-                                        (java.time.ZoneId/of "America/Chicago")))
-      (dual-axis-angles))
-
-  ;; Calculate for summer solstice at noon
-  (let [pos (solar-position 39.8 -89.6
-                            (ZonedDateTime/of 2026 6 21 12 0 0 0
-                                              (java.time.ZoneId/of "America/Chicago")))]
-    {:zenith (:zenith pos)
-     :summer-tilt (seasonal-tilt-adjustment 39.8 :summer)})
-  )

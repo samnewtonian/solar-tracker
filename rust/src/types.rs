@@ -63,7 +63,6 @@ pub struct LookupTableConfig {
     pub interval_minutes: i32,
     pub latitude: f64,
     pub longitude: f64,
-    pub std_meridian: f64,
     pub year: i32,
     pub sunrise_buffer_minutes: i32,
     pub sunset_buffer_minutes: i32,
@@ -75,7 +74,6 @@ impl Default for LookupTableConfig {
             interval_minutes: 5,
             latitude: 39.8,
             longitude: -89.6,
-            std_meridian: -90.0,
             year: 2026,
             sunrise_buffer_minutes: 30,
             sunset_buffer_minutes: 30,
@@ -92,11 +90,3 @@ pub struct LookupTable<E> {
 
 pub type SingleAxisTable = LookupTable<SingleAxisEntry>;
 pub type DualAxisTable = LookupTable<DualAxisEntry>;
-
-#[derive(Debug, Clone, PartialEq)]
-pub struct ExampleResult {
-    pub solar_position: SolarPosition,
-    pub single_axis_rotation: f64,
-    pub dual_axis: DualAxisAngles,
-    pub fixed_optimal_tilt: f64,
-}

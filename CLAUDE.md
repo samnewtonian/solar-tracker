@@ -11,6 +11,8 @@ Solar angle calculation library for computing optimal solar panel angles based o
 ```
 clojure/                          # Clojure implementation
   deps.edn                        # Project dependencies
+  examples/
+    calculation.clj               # Standalone example
   src/com/kardashevtypev/solar/
     angles.clj                    # Core solar position & panel angle calculations
     angles/spec.clj               # Clojure specs for validation
@@ -23,6 +25,8 @@ clojure/                          # Clojure implementation
 
 python/                           # Python implementation (package: solar_tracker)
   pyproject.toml                  # Hatchling build, requires Python >=3.11
+  examples/
+    calculation.py                # Standalone example
   solar_tracker/
     __init__.py                   # Re-exports full public API
     _types.py                     # Frozen dataclasses & Season StrEnum
@@ -34,7 +38,9 @@ python/                           # Python implementation (package: solar_tracke
     test_lookup_table.py          # Lookup table test suite
 
 rust/                             # Rust implementation (crate: solar_tracker)
-  Cargo.toml                      # No external dependencies
+  Cargo.toml                      # Depends on chrono
+  examples/
+    calculation.rs                # Standalone example using chrono-tz
   src/
     lib.rs                        # Crate root, mod declarations + pub use re-exports
     types.rs                      # Structs, enums, Default impl
@@ -45,7 +51,9 @@ rust/                             # Rust implementation (crate: solar_tracker)
     test_lookup_table.rs          # Lookup table integration tests (33 tests)
 
 dev/archnotes/                    # Design documents
-doc/                              # Implementation notes
+doc/                              # Documentation
+  api-reference.md                # Cross-language public API reference
+  internal-helpers.md             # Per-language internal helper catalog
 ```
 
 ## Implementation Notes
@@ -60,32 +68,34 @@ doc/                              # Implementation notes
 - Clojure specs for input/output validation
 - Run tests: `cd clojure && clj -X:test`
 
-### Python (`python/`) — not yet updated to new API
+### Python (`python/`)
 
 - Package: `solar_tracker`
-- **Still uses old 8-arg `solar_position(lat, lon, year, month, day, hour, minute, std_meridian)` with `local_solar_time`** — pending port of Clojure ZonedDateTime changes
+- **`solar_position` takes `(latitude, longitude, datetime)`** — accepts any timezone-aware `datetime`, converts to UTC internally via `.astimezone(timezone.utc)`. Raises `ValueError` for naive datetimes.
+- No `std_meridian` parameter or `local_solar_time` function; UTC-based calculation uses `utc_lst_correction` (longitude + EoT) computed once per day
+- Public helpers: `leap_year`, `days_in_months`, `utc_lst_correction`, `solar_angles_at`
 - Frozen dataclasses for return types (`SolarPosition`, `DualAxisAngles`, etc.)
 - `Season` is a `StrEnum` (`"summer"`, `"winter"`, `"spring"`, `"fall"`)
 - Type hints on all public functions; no runtime validation module
 - No external dependencies (stdlib only); `pytest` is a dev dependency
 - Run tests: `cd python && python -m pytest`
 
-### Rust (`rust/`) — not yet updated to new API
+### Rust (`rust/`)
 
 - Crate: `solar_tracker`
-- **Still uses old 8-arg `solar_position(lat, lon, year, month, day, hour, minute, std_meridian)` with `local_solar_time`** — pending port of Clojure ZonedDateTime changes
+- **`solar_position` takes `(latitude, longitude, &DateTime<Tz>)`** — accepts any `chrono::DateTime<Tz>`, converts to UTC internally via `.with_timezone(&Utc)`
+- No `std_meridian` parameter or `local_solar_time` function; UTC-based calculation uses `utc_lst_correction` (longitude + EoT) computed once per day
+- Public helpers: `leap_year`, `days_in_months`, `utc_lst_correction`, `solar_angles_at`
 - Structs with derives for return types (`SolarPosition`, `DualAxisAngles`, etc.)
 - `Season` is an enum with variants `Summer`, `Winter`, `Spring`, `Fall`
 - Generic `LookupTable<E>` and `DayData<E>` with type aliases `SingleAxisTable` / `DualAxisTable`
-- No external dependencies (std only)
+- Depends on `chrono` (with `clock` feature)
 - Run tests: `cd rust && cargo test`
 - Lint: `cd rust && cargo clippy -- -D warnings`
 
 ## Architecture
 
-**Calculation pipeline (Clojure — reference):** ZonedDateTime → UTC conversion → day-of-year → equation of time + declination → `utc-lst-correction` (constant per day) → local solar time → hour angle → zenith/azimuth → panel angles
-
-**Calculation pipeline (Python/Rust — old API):** local time + std_meridian → local solar time → hour angle + declination → zenith/azimuth → panel angles
+**Calculation pipeline (all implementations):** timezone-aware datetime → UTC conversion → day-of-year → equation of time + declination → `utc-lst-correction` (constant per day) → local solar time → hour angle → zenith/azimuth → panel angles
 
 **Module structure (all implementations):**
 - `angles` — Core solar position and panel angle functions. Entry point is `solar_position` / `solar-position` which returns all computed angles.

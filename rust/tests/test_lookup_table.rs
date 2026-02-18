@@ -23,7 +23,6 @@ fn test_default_config() {
     assert_eq!(c.interval_minutes, 5);
     assert_eq!(c.latitude, 39.8);
     assert_eq!(c.longitude, -89.6);
-    assert_eq!(c.std_meridian, -90.0);
     assert_eq!(c.year, 2026);
     assert_eq!(c.sunrise_buffer_minutes, 30);
     assert_eq!(c.sunset_buffer_minutes, 30);
@@ -60,7 +59,7 @@ fn test_intervals_per_day() {
 
 #[test]
 fn test_doy_roundtrip() {
-    let cases: &[(i32, i32, i32)] = &[
+    let cases: &[(i32, u32, u32)] = &[
         (2026, 1, 1),
         (2026, 3, 21),
         (2026, 6, 21),
@@ -153,32 +152,31 @@ fn test_single_axis_entries_type() {
 
 #[test]
 fn test_single_axis_rotation_near_zero_at_noon() {
-    let noon_entries: Vec<_> = SA_TABLE_15.days[79]
+    // Solar noon for Springfield in UTC is around minute 1080
+    let e = SA_TABLE_15.days[79]
         .entries
         .iter()
-        .filter(|e| e.minutes == 720)
-        .collect();
-    if let Some(e) = noon_entries.first() {
-        assert!(e.rotation.is_some());
-        assert_approx!(e.rotation.unwrap(), 0.0, 5.0);
-    }
+        .find(|e| e.minutes == 1080)
+        .expect("should have entry at minute 1080");
+    assert!(e.rotation.is_some());
+    assert_approx!(e.rotation.unwrap(), 0.0, 5.0);
 }
 
 #[test]
 fn test_single_axis_morning_negative_afternoon_positive() {
     let entries = &SA_TABLE_15.days[79].entries;
+    // Morning in UTC: ~960 minutes (16:00 UTC ~ 10am local clock time)
     let morning = entries
         .iter()
-        .find(|e| e.rotation.is_some() && e.minutes < 600);
+        .find(|e| e.rotation.is_some() && e.minutes >= 960 && e.minutes < 1065)
+        .expect("should have a morning entry with rotation");
+    assert!(morning.rotation.unwrap() < 0.0);
+    // Afternoon in UTC: >1095 minutes
     let afternoon = entries
         .iter()
-        .find(|e| e.rotation.is_some() && e.minutes > 840);
-    if let Some(m) = morning {
-        assert!(m.rotation.unwrap() < 0.0);
-    }
-    if let Some(a) = afternoon {
-        assert!(a.rotation.unwrap() > 0.0);
-    }
+        .find(|e| e.rotation.is_some() && e.minutes > 1095)
+        .expect("should have an afternoon entry with rotation");
+    assert!(afternoon.rotation.unwrap() > 0.0);
 }
 
 // ── Dual axis one day ──
@@ -208,15 +206,14 @@ fn test_dual_axis_entries_type() {
 
 #[test]
 fn test_dual_axis_tilt_matches_zenith_at_noon() {
-    let noon_entries: Vec<_> = DA_TABLE_15.days[79]
+    // Solar noon for Springfield in UTC is around minute 1080
+    let e = DA_TABLE_15.days[79]
         .entries
         .iter()
-        .filter(|e| e.minutes == 720)
-        .collect();
-    if let Some(e) = noon_entries.first() {
-        assert!(e.tilt.is_some());
-        assert_approx!(e.tilt.unwrap(), 40.0, 5.0);
-    }
+        .find(|e| e.minutes == 1080)
+        .expect("should have entry at minute 1080");
+    assert!(e.tilt.is_some());
+    assert_approx!(e.tilt.unwrap(), 40.0, 5.0);
 }
 
 // ── Full year generation ──
@@ -264,26 +261,27 @@ fn test_full_year_entry_structure_consistent() {
 
 #[test]
 fn test_lookup_single_axis_exact_boundary() {
-    let result = lookup_single_axis(&SA_TABLE_15, 80, 720);
+    // Solar noon in UTC for Springfield
+    let result = lookup_single_axis(&SA_TABLE_15, 80, 1080);
     assert!(result.is_some());
     let r = result.unwrap();
-    assert_eq!(r.minutes, 720);
+    assert_eq!(r.minutes, 1080);
     assert!(r.rotation.is_some());
 }
 
 #[test]
 fn test_lookup_single_axis_interpolated() {
-    let result = lookup_single_axis(&SA_TABLE_15, 80, 727);
-    let at_720 = lookup_single_axis(&SA_TABLE_15, 80, 720);
-    let at_735 = lookup_single_axis(&SA_TABLE_15, 80, 735);
+    let result = lookup_single_axis(&SA_TABLE_15, 80, 1087);
+    let at_1080 = lookup_single_axis(&SA_TABLE_15, 80, 1080);
+    let at_1095 = lookup_single_axis(&SA_TABLE_15, 80, 1095);
     assert!(result.is_some());
     let r = result.unwrap();
-    assert_eq!(r.minutes, 727);
-    if let (Some(rot), Some(r720), Some(r735)) =
-        (r.rotation, at_720.unwrap().rotation, at_735.unwrap().rotation)
+    assert_eq!(r.minutes, 1087);
+    if let (Some(rot), Some(r1080), Some(r1095)) =
+        (r.rotation, at_1080.unwrap().rotation, at_1095.unwrap().rotation)
     {
-        let lo = r720.min(r735);
-        let hi = r720.max(r735);
+        let lo = r1080.min(r1095);
+        let hi = r1080.max(r1095);
         assert!(
             rot >= lo - 0.01 && rot <= hi + 0.01,
             "rot={}, lo={}, hi={}",
@@ -296,7 +294,7 @@ fn test_lookup_single_axis_interpolated() {
 
 #[test]
 fn test_lookup_dual_axis_exact_boundary() {
-    let result = lookup_dual_axis(&DA_TABLE_15, 80, 720);
+    let result = lookup_dual_axis(&DA_TABLE_15, 80, 1080);
     assert!(result.is_some());
     let r = result.unwrap();
     assert!(r.tilt.is_some());
@@ -305,7 +303,7 @@ fn test_lookup_dual_axis_exact_boundary() {
 
 #[test]
 fn test_lookup_dual_axis_interpolated() {
-    let result = lookup_dual_axis(&DA_TABLE_15, 80, 727);
+    let result = lookup_dual_axis(&DA_TABLE_15, 80, 1087);
     assert!(result.is_some());
     let r = result.unwrap();
     assert!(r.tilt.is_some());

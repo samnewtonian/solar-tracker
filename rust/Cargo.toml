@@ -6,3 +6,7 @@ description = "Solar angle calculation library for solar panel tracking systems"
 license = "Apache-2.0"
 
 [dependencies]
+chrono = { version = "0.4", default-features = false, features = ["clock"] }
+
+[dev-dependencies]
+chrono-tz = "0.10"

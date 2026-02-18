@@ -1,4 +1,6 @@
-use crate::types::{DualAxisAngles, ExampleResult, Season, SolarPosition};
+use chrono::{DateTime, Datelike, TimeZone, Timelike, Utc};
+
+use crate::types::{DualAxisAngles, Season, SolarPosition};
 
 pub const EARTH_AXIAL_TILT: f64 = 23.45;
 pub const DEGREES_PER_HOUR: f64 = 15.0;
@@ -15,15 +17,22 @@ pub fn normalize_angle(angle: f64) -> f64 {
     angle.rem_euclid(360.0)
 }
 
-pub fn day_of_year(year: i32, month: i32, day: i32) -> i32 {
-    let leap = (year % 400 == 0) || (year % 4 == 0 && year % 100 != 0);
-    let days_in_months = [
+pub fn leap_year(year: i32) -> bool {
+    (year % 400 == 0) || (year % 4 == 0 && year % 100 != 0)
+}
+
+pub fn days_in_months(year: i32) -> [u32; 12] {
+    [
         31,
-        if leap { 29 } else { 28 },
+        if leap_year(year) { 29 } else { 28 },
         31, 30, 31, 30, 31, 31, 30, 31, 30, 31,
-    ];
-    let sum: i32 = days_in_months[..(month - 1) as usize].iter().sum();
-    sum + day
+    ]
+}
+
+pub fn day_of_year(year: i32, month: u32, day: u32) -> i32 {
+    let dim = days_in_months(year);
+    let sum: u32 = dim[..(month - 1) as usize].iter().sum();
+    (sum + day) as i32
 }
 
 pub fn intermediate_angle_b(n: i32) -> f64 {
@@ -40,11 +49,8 @@ pub fn equation_of_time(n: i32) -> f64 {
             - 0.040849 * (2.0 * b).sin())
 }
 
-pub fn local_solar_time(local_time: f64, std_meridian: f64, longitude: f64, n: i32) -> f64 {
-    let eot = equation_of_time(n);
-    let long_correction = (4.0 * (std_meridian - longitude)) / 60.0;
-    let eot_correction = eot / 60.0;
-    local_time + long_correction + eot_correction
+pub fn utc_lst_correction(longitude: f64, eot: f64) -> f64 {
+    (4.0 * longitude + eot) / 60.0
 }
 
 pub fn hour_angle(local_solar_time: f64) -> f64 {
@@ -78,26 +84,39 @@ pub fn solar_azimuth(latitude: f64, declination: f64, hour_angle: f64) -> f64 {
     normalize_angle(rad_to_deg(az_rad))
 }
 
-#[allow(clippy::too_many_arguments)]
-pub fn solar_position(
+pub fn solar_angles_at(
+    latitude: f64,
+    decl: f64,
+    correction: f64,
+    utc_hours: f64,
+) -> (f64, f64, f64, f64, f64) {
+    let lst = (utc_hours + correction).rem_euclid(24.0);
+    let ha = hour_angle(lst);
+    let lat_rad = deg_to_rad(latitude);
+    let dec_rad = deg_to_rad(decl);
+    let ha_rad = deg_to_rad(ha);
+    let cos_zenith =
+        lat_rad.sin() * dec_rad.sin() + lat_rad.cos() * dec_rad.cos() * ha_rad.cos();
+    let z = rad_to_deg(cos_zenith.clamp(-1.0, 1.0).acos());
+    let alt = solar_altitude(z);
+    let sin_az = -dec_rad.cos() * ha_rad.sin();
+    let cos_az = dec_rad.sin() * lat_rad.cos() - dec_rad.cos() * lat_rad.sin() * ha_rad.cos();
+    let azim = normalize_angle(rad_to_deg(sin_az.atan2(cos_az)));
+    (lst, ha, z, alt, azim)
+}
+
+pub fn solar_position<Tz: TimeZone>(
     latitude: f64,
     longitude: f64,
-    year: i32,
-    month: i32,
-    day: i32,
-    hour: i32,
-    minute: i32,
-    std_meridian: f64,
+    dt: &DateTime<Tz>,
 ) -> SolarPosition {
-    let n = day_of_year(year, month, day);
-    let local_time = hour as f64 + minute as f64 / 60.0;
+    let utc = dt.with_timezone(&Utc);
+    let utc_hours = utc.hour() as f64 + utc.minute() as f64 / 60.0 + utc.second() as f64 / 3600.0;
+    let n = utc.ordinal() as i32;
     let eot = equation_of_time(n);
-    let lst = local_solar_time(local_time, std_meridian, longitude, n);
-    let ha = hour_angle(lst);
     let decl = solar_declination(n);
-    let zenith = solar_zenith_angle(latitude, decl, ha);
-    let alt = solar_altitude(zenith);
-    let azim = solar_azimuth(latitude, decl, ha);
+    let correction = utc_lst_correction(longitude, eot);
+    let (lst, ha, zenith, alt, azim) = solar_angles_at(latitude, decl, correction, utc_hours);
     SolarPosition {
         day_of_year: n,
         declination: decl,
@@ -128,60 +147,11 @@ pub fn optimal_fixed_tilt(latitude: f64) -> f64 {
 }
 
 pub fn seasonal_tilt_adjustment(latitude: f64, season: Season) -> f64 {
+    let abs_lat = latitude.abs();
     match season {
-        Season::Summer => latitude.abs() - 15.0,
-        Season::Winter => latitude.abs() + 15.0,
-        Season::Spring | Season::Fall => latitude.abs(),
+        Season::Summer => abs_lat - 15.0,
+        Season::Winter => abs_lat + 15.0,
+        Season::Spring | Season::Fall => abs_lat,
     }
 }
 
-pub fn example_calculation() -> ExampleResult {
-    let latitude = 39.8;
-    let longitude = -89.6;
-    let std_meridian = -90.0;
-    let year = 2026;
-    let month = 3;
-    let day = 21;
-    let hour = 12;
-    let minute = 0;
-
-    let pos = solar_position(latitude, longitude, year, month, day, hour, minute, std_meridian);
-    let sa = single_axis_tilt(&pos, latitude);
-    let da = dual_axis_angles(&pos);
-    let fixed_annual = optimal_fixed_tilt(latitude);
-
-    println!("=== Solar Position Calculation Example ===");
-    println!(
-        "Location: Springfield, IL ({:.1}°N, {:.1}°W)",
-        latitude, -longitude
-    );
-    println!("Date: {}-{:02}-{:02}", year, month, day);
-    println!("Time: {:02}:{:02} local time", hour, minute);
-    println!();
-    println!("--- Solar Position ---");
-    println!("Day of year: {}", pos.day_of_year);
-    println!("Declination: {:.2}°", pos.declination);
-    println!("Equation of Time: {:.2} minutes", pos.equation_of_time);
-    println!("Local Solar Time: {:.2} hours", pos.local_solar_time);
-    println!("Hour Angle: {:.2}°", pos.hour_angle);
-    println!("Zenith Angle: {:.2}°", pos.zenith);
-    println!("Altitude: {:.2}°", pos.altitude);
-    println!(
-        "Azimuth: {:.2}° (0°=N, 90°=E, 180°=S)",
-        pos.azimuth
-    );
-    println!();
-    println!("--- Optimal Panel Angles ---");
-    println!("Single-axis tracker rotation: {:.2}°", sa);
-    println!("Dual-axis tilt: {:.2}°", da.tilt);
-    println!("Dual-axis panel azimuth: {:.2}°", da.panel_azimuth);
-    println!("Fixed annual optimal tilt: {:.1}°", fixed_annual);
-    println!();
-
-    ExampleResult {
-        solar_position: pos,
-        single_axis_rotation: sa,
-        dual_axis: da,
-        fixed_optimal_tilt: fixed_annual,
-    }
-}

@@ -1,3 +1,5 @@
+use chrono::{FixedOffset, TimeZone};
+
 use solar_tracker::types::{Season, SolarPosition};
 use solar_tracker::angles::*;
 
@@ -10,6 +12,11 @@ macro_rules! assert_approx {
             l, r, (l - r).abs(), $tol
         );
     };
+}
+
+fn dt(year: i32, month: u32, day: u32, hour: u32, minute: u32, offset_hours: i32) -> chrono::DateTime<FixedOffset> {
+    let offset = FixedOffset::east_opt(offset_hours * 3600).unwrap();
+    offset.with_ymd_and_hms(year, month, day, hour, minute, 0).unwrap()
 }
 
 // ── DayOfYear ──
@@ -38,7 +45,7 @@ fn test_day_of_year_century_leap_rules() {
 fn test_first_day_of_each_month_non_leap() {
     let expected = [1, 32, 60, 91, 121, 152, 182, 213, 244, 274, 305, 335];
     for (i, &exp) in expected.iter().enumerate() {
-        let month = i as i32 + 1;
+        let month = i as u32 + 1;
         assert_eq!(day_of_year(2026, month, 1), exp, "Month {}", month);
     }
 }
@@ -47,7 +54,7 @@ fn test_first_day_of_each_month_non_leap() {
 fn test_first_day_of_each_month_leap() {
     let expected = [1, 32, 61, 92, 122, 153, 183, 214, 245, 275, 306, 336];
     for (i, &exp) in expected.iter().enumerate() {
-        let month = i as i32 + 1;
+        let month = i as u32 + 1;
         assert_eq!(day_of_year(2024, month, 1), exp, "Month {} (leap)", month);
     }
 }
@@ -115,7 +122,7 @@ fn test_solar_declination_bounded_all_days() {
 // ── SolarPosition — Springfield Equinox ──
 
 fn springfield_equinox() -> SolarPosition {
-    solar_position(39.8, -89.6, 2026, 3, 21, 12, 0, -90.0)
+    solar_position(39.8, -89.6, &dt(2026, 3, 21, 12, 0, -6))
 }
 
 #[test]
@@ -157,7 +164,7 @@ fn test_springfield_equinox_azimuth() {
 
 #[test]
 fn test_summer_solstice() {
-    let pos = solar_position(39.8, -89.6, 2026, 6, 21, 12, 0, -90.0);
+    let pos = solar_position(39.8, -89.6, &dt(2026, 6, 21, 12, 0, -6));
     assert_approx!(pos.declination, 23.45, 1.0);
     assert!(pos.zenith < 40.0, "zenith={}", pos.zenith);
     assert!(pos.altitude > 50.0, "altitude={}", pos.altitude);
@@ -165,7 +172,7 @@ fn test_summer_solstice() {
 
 #[test]
 fn test_winter_solstice() {
-    let pos = solar_position(39.8, -89.6, 2026, 12, 21, 12, 0, -90.0);
+    let pos = solar_position(39.8, -89.6, &dt(2026, 12, 21, 12, 0, -6));
     assert_approx!(pos.declination, -23.45, 1.0);
     assert!(pos.zenith > 40.0, "zenith={}", pos.zenith);
     assert!(pos.altitude < 50.0, "altitude={}", pos.altitude);
@@ -175,19 +182,19 @@ fn test_winter_solstice() {
 
 #[test]
 fn test_single_axis_near_zero_at_noon() {
-    let pos = solar_position(39.8, -89.6, 2026, 3, 21, 12, 0, -90.0);
+    let pos = solar_position(39.8, -89.6, &dt(2026, 3, 21, 12, 0, -6));
     assert_approx!(single_axis_tilt(&pos, 39.8), 0.0, 5.0);
 }
 
 #[test]
 fn test_single_axis_negative_morning() {
-    let pos = solar_position(39.8, -89.6, 2026, 3, 21, 9, 0, -90.0);
+    let pos = solar_position(39.8, -89.6, &dt(2026, 3, 21, 9, 0, -6));
     assert!(single_axis_tilt(&pos, 39.8) < 0.0);
 }
 
 #[test]
 fn test_single_axis_positive_afternoon() {
-    let pos = solar_position(39.8, -89.6, 2026, 3, 21, 15, 0, -90.0);
+    let pos = solar_position(39.8, -89.6, &dt(2026, 3, 21, 15, 0, -6));
     assert!(single_axis_tilt(&pos, 39.8) > 0.0);
 }
 
@@ -195,14 +202,14 @@ fn test_single_axis_positive_afternoon() {
 
 #[test]
 fn test_dual_axis_tilt_equals_zenith() {
-    let pos = solar_position(39.8, -89.6, 2026, 3, 21, 12, 0, -90.0);
+    let pos = solar_position(39.8, -89.6, &dt(2026, 3, 21, 12, 0, -6));
     let da = dual_axis_angles(&pos);
     assert_approx!(da.tilt, pos.zenith, 0.01);
 }
 
 #[test]
 fn test_dual_axis_panel_azimuth_opposite_sun() {
-    let pos = solar_position(39.8, -89.6, 2026, 3, 21, 12, 0, -90.0);
+    let pos = solar_position(39.8, -89.6, &dt(2026, 3, 21, 12, 0, -6));
     let da = dual_axis_angles(&pos);
     assert!(
         (354.0..=360.0).contains(&da.panel_azimuth)
@@ -273,16 +280,6 @@ fn test_seasonal_tilt_equator() {
     assert_approx!(seasonal_tilt_adjustment(0.0, Season::Spring), 0.0, 0.01);
 }
 
-// ── ExampleCalculation ──
-
-#[test]
-fn test_example_calculation_runs() {
-    let result = example_calculation();
-    // Just verify all fields are populated
-    assert!(result.solar_position.day_of_year > 0);
-    assert!(result.fixed_optimal_tilt > 0.0);
-}
-
 // ── HourAngle ──
 
 #[test]
@@ -328,7 +325,7 @@ fn test_known_conversions() {
 
 #[test]
 fn test_equator_sun_overhead() {
-    let pos = solar_position(0.0, 0.0, 2026, 3, 21, 12, 0, 0.0);
+    let pos = solar_position(0.0, 0.0, &dt(2026, 3, 21, 12, 0, 0));
     assert_approx!(pos.declination, 0.0, 1.0);
     assert!(pos.zenith < 5.0, "zenith={}", pos.zenith);
     assert!(pos.altitude > 85.0, "altitude={}", pos.altitude);
@@ -338,14 +335,14 @@ fn test_equator_sun_overhead() {
 
 #[test]
 fn test_polar_summer() {
-    let pos = solar_position(70.0, 15.0, 2026, 6, 21, 12, 0, 15.0);
+    let pos = solar_position(70.0, 15.0, &dt(2026, 6, 21, 12, 0, 1));
     assert!(pos.altitude > 0.0);
     assert!(pos.zenith < 90.0);
 }
 
 #[test]
 fn test_polar_winter() {
-    let pos = solar_position(70.0, 15.0, 2026, 12, 21, 12, 0, 15.0);
+    let pos = solar_position(70.0, 15.0, &dt(2026, 12, 21, 12, 0, 1));
     assert!(pos.zenith > 85.0);
 }
 
@@ -353,8 +350,8 @@ fn test_polar_winter() {
 
 #[test]
 fn test_southern_hemisphere_reversed_seasons() {
-    let pos_jun = solar_position(-33.9, 151.2, 2026, 6, 21, 12, 0, 150.0);
-    let pos_dec = solar_position(-33.9, 151.2, 2026, 12, 21, 12, 0, 150.0);
+    let pos_jun = solar_position(-33.9, 151.2, &dt(2026, 6, 21, 12, 0, 10));
+    let pos_dec = solar_position(-33.9, 151.2, &dt(2026, 12, 21, 12, 0, 10));
     assert!(pos_jun.zenith > pos_dec.zenith);
     assert!(pos_jun.altitude < pos_dec.altitude);
 }
@@ -363,7 +360,7 @@ fn test_southern_hemisphere_reversed_seasons() {
 
 #[test]
 fn test_midnight_below_horizon() {
-    let pos = solar_position(39.8, -89.6, 2026, 3, 21, 0, 0, -90.0);
+    let pos = solar_position(39.8, -89.6, &dt(2026, 3, 21, 0, 0, -6));
     assert!(pos.altitude < 0.0);
     assert!(pos.zenith > 90.0);
 }
@@ -372,15 +369,15 @@ fn test_midnight_below_horizon() {
 
 #[test]
 fn test_zenith_altitude_complement() {
-    let cases: &[(f64, f64, i32, i32, i32, i32, i32, f64)] = &[
-        (39.8, -89.6, 2026, 3, 21, 12, 0, -90.0),
-        (0.0, 0.0, 2026, 6, 21, 12, 0, 0.0),
-        (-33.9, 151.2, 2026, 12, 21, 15, 30, 150.0),
-        (51.5, -0.1, 2026, 9, 22, 8, 0, 0.0),
-        (70.0, 25.0, 2026, 6, 21, 18, 0, 30.0),
+    let cases: Vec<(f64, f64, chrono::DateTime<FixedOffset>)> = vec![
+        (39.8, -89.6, dt(2026, 3, 21, 12, 0, -6)),
+        (0.0, 0.0, dt(2026, 6, 21, 12, 0, 0)),
+        (-33.9, 151.2, dt(2026, 12, 21, 15, 30, 10)),
+        (51.5, -0.1, dt(2026, 9, 22, 8, 0, 0)),
+        (70.0, 25.0, dt(2026, 6, 21, 18, 0, 2)),
     ];
-    for &(lat, lon, yr, mo, dy, hr, mn, std) in cases {
-        let pos = solar_position(lat, lon, yr, mo, dy, hr, mn, std);
+    for (lat, lon, datetime) in &cases {
+        let pos = solar_position(*lat, *lon, datetime);
         assert_approx!(pos.zenith + pos.altitude, 90.0, 1e-10);
     }
 }
@@ -389,21 +386,21 @@ fn test_zenith_altitude_complement() {
 
 #[test]
 fn test_azimuth_always_normalized() {
-    let cases: &[(f64, f64, i32, i32, i32, i32, i32, f64)] = &[
-        (39.8, -89.6, 2026, 1, 15, 8, 0, -90.0),
-        (39.8, -89.6, 2026, 1, 15, 16, 0, -90.0),
-        (39.8, -89.6, 2026, 7, 15, 6, 0, -90.0),
-        (39.8, -89.6, 2026, 7, 15, 20, 0, -90.0),
-        (-45.0, 170.0, 2026, 3, 21, 12, 0, 180.0),
-        (60.0, 10.0, 2026, 6, 21, 3, 0, 15.0),
-        (0.0, 0.0, 2026, 9, 22, 12, 0, 0.0),
+    let cases: Vec<(f64, f64, chrono::DateTime<FixedOffset>)> = vec![
+        (39.8, -89.6, dt(2026, 1, 15, 8, 0, -6)),
+        (39.8, -89.6, dt(2026, 1, 15, 16, 0, -6)),
+        (39.8, -89.6, dt(2026, 7, 15, 6, 0, -6)),
+        (39.8, -89.6, dt(2026, 7, 15, 20, 0, -6)),
+        (-45.0, 170.0, dt(2026, 3, 21, 12, 0, 12)),
+        (60.0, 10.0, dt(2026, 6, 21, 3, 0, 1)),
+        (0.0, 0.0, dt(2026, 9, 22, 12, 0, 0)),
     ];
-    for &(lat, lon, yr, mo, dy, hr, mn, std) in cases {
-        let pos = solar_position(lat, lon, yr, mo, dy, hr, mn, std);
+    for (lat, lon, datetime) in &cases {
+        let pos = solar_position(*lat, *lon, datetime);
         assert!(
             pos.azimuth >= 0.0 && pos.azimuth < 360.0,
-            "azimuth={} for ({}, {}, {}-{}-{} {}:{})",
-            pos.azimuth, lat, lon, yr, mo, dy, hr, mn
+            "azimuth={} for ({}, {})",
+            pos.azimuth, lat, lon
         );
     }
 }
@@ -468,16 +465,16 @@ fn test_dual_axis_panel_azimuth_normalized() {
 
 #[test]
 fn test_multiple_cities_noon_equinox() {
-    let cases: &[(&str, f64, f64, f64)] = &[
-        ("London", 51.5, -0.1, 0.0),
-        ("Tokyo", 35.7, 139.7, 135.0),
-        ("Cape Town", -33.9, 18.4, 30.0),
-        ("Quito", -0.2, -78.5, -75.0),
+    let cases: Vec<(&str, f64, f64, i32)> = vec![
+        ("London", 51.5, -0.1, 0),
+        ("Tokyo", 35.7, 139.7, 9),
+        ("Cape Town", -33.9, 18.4, 2),
+        ("Quito", -0.2, -78.5, -5),
     ];
-    for &(name, lat, lon, std) in cases {
-        let pos = solar_position(lat, lon, 2026, 3, 21, 12, 0, std);
+    for (name, lat, lon, offset) in &cases {
+        let pos = solar_position(*lat, *lon, &dt(2026, 3, 21, 12, 0, *offset));
         assert_approx!(pos.zenith, lat.abs(), 8.0);
-        let _ = name; // used in error messages via assert_approx
+        let _ = name;
     }
 }
 
@@ -485,8 +482,8 @@ fn test_multiple_cities_noon_equinox() {
 
 #[test]
 fn test_morning_afternoon_symmetry() {
-    let pos_9am = solar_position(39.8, -89.6, 2026, 3, 21, 9, 0, -90.0);
-    let pos_3pm = solar_position(39.8, -89.6, 2026, 3, 21, 15, 0, -90.0);
+    let pos_9am = solar_position(39.8, -89.6, &dt(2026, 3, 21, 9, 0, -6));
+    let pos_3pm = solar_position(39.8, -89.6, &dt(2026, 3, 21, 15, 0, -6));
     assert_approx!(pos_9am.zenith, pos_3pm.zenith, 5.0);
     assert!(pos_9am.azimuth < 180.0);
     assert!(pos_3pm.azimuth > 180.0);

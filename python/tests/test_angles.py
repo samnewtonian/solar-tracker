@@ -10,7 +10,6 @@ from solar_tracker.angles import (
     day_of_year,
     deg_to_rad,
     dual_axis_angles,
-    example_calculation,
     hour_angle,
     normalize_angle,
     optimal_fixed_tilt,
@@ -214,16 +213,6 @@ class TestSeasonalTiltAdjustment:
         assert seasonal_tilt_adjustment(0.0, Season.SUMMER) == pytest.approx(-15.0, abs=0.01)
         assert seasonal_tilt_adjustment(0.0, Season.WINTER) == pytest.approx(15.0, abs=0.01)
         assert seasonal_tilt_adjustment(0.0, Season.SPRING) == pytest.approx(0.0, abs=0.01)
-
-
-class TestExampleCalculation:
-    def test_runs_without_error(self):
-        result = example_calculation()
-        assert isinstance(result, dict)
-        assert "solar_position" in result
-        assert "single_axis_rotation" in result
-        assert "dual_axis" in result
-        assert "fixed_optimal_tilt" in result
 
 
 class TestHourAngleProperties:
