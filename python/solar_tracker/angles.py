@@ -216,12 +216,13 @@ def optimal_fixed_tilt(latitude: float) -> float:
 
 def seasonal_tilt_adjustment(latitude: float, season: Season) -> float:
     """Calculate seasonal tilt adjustment for fixed installations."""
+    abs_lat = abs(latitude)
     match season:
         case Season.SUMMER:
-            return abs(latitude) - 15.0
+            return abs_lat - 15.0
         case Season.WINTER:
-            return abs(latitude) + 15.0
+            return abs_lat + 15.0
         case Season.SPRING | Season.FALL:
-            return abs(latitude)
+            return abs_lat
         case _:
             raise ValueError(f"Unknown season: {season}")

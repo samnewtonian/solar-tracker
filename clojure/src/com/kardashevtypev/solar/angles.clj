@@ -273,8 +273,9 @@
      season   - One of :summer, :winter, :spring, :fall
    Output: recommended tilt angle in degrees"
   [latitude season]
-  (case season
-    :summer (- (abs latitude) 15.0)
-    :winter (+ (abs latitude) 15.0)
-    (:spring :fall) (abs latitude)))
+  (let [abs-lat (abs latitude)]
+    (case season
+      :summer (- abs-lat 15.0)
+      :winter (+ abs-lat 15.0)
+      (:spring :fall) abs-lat)))
 

@@ -92,9 +92,16 @@ pub fn solar_angles_at(
 ) -> (f64, f64, f64, f64, f64) {
     let lst = (utc_hours + correction).rem_euclid(24.0);
     let ha = hour_angle(lst);
-    let z = solar_zenith_angle(latitude, decl, ha);
+    let lat_rad = deg_to_rad(latitude);
+    let dec_rad = deg_to_rad(decl);
+    let ha_rad = deg_to_rad(ha);
+    let cos_zenith =
+        lat_rad.sin() * dec_rad.sin() + lat_rad.cos() * dec_rad.cos() * ha_rad.cos();
+    let z = rad_to_deg(cos_zenith.clamp(-1.0, 1.0).acos());
     let alt = solar_altitude(z);
-    let azim = solar_azimuth(latitude, decl, ha);
+    let sin_az = -dec_rad.cos() * ha_rad.sin();
+    let cos_az = dec_rad.sin() * lat_rad.cos() - dec_rad.cos() * lat_rad.sin() * ha_rad.cos();
+    let azim = normalize_angle(rad_to_deg(sin_az.atan2(cos_az)));
     (lst, ha, z, alt, azim)
 }
 
@@ -105,7 +112,7 @@ pub fn solar_position<Tz: TimeZone>(
 ) -> SolarPosition {
     let utc = dt.with_timezone(&Utc);
     let utc_hours = utc.hour() as f64 + utc.minute() as f64 / 60.0 + utc.second() as f64 / 3600.0;
-    let n = day_of_year(utc.year(), utc.month(), utc.day());
+    let n = utc.ordinal() as i32;
     let eot = equation_of_time(n);
     let decl = solar_declination(n);
     let correction = utc_lst_correction(longitude, eot);
@@ -140,10 +147,11 @@ pub fn optimal_fixed_tilt(latitude: f64) -> f64 {
 }
 
 pub fn seasonal_tilt_adjustment(latitude: f64, season: Season) -> f64 {
+    let abs_lat = latitude.abs();
     match season {
-        Season::Summer => latitude.abs() - 15.0,
-        Season::Winter => latitude.abs() + 15.0,
-        Season::Spring | Season::Fall => latitude.abs(),
+        Season::Summer => abs_lat - 15.0,
+        Season::Winter => abs_lat + 15.0,
+        Season::Spring | Season::Fall => abs_lat,
     }
 }
 

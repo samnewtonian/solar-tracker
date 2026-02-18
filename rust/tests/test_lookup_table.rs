@@ -153,34 +153,30 @@ fn test_single_axis_entries_type() {
 #[test]
 fn test_single_axis_rotation_near_zero_at_noon() {
     // Solar noon for Springfield in UTC is around minute 1080
-    let noon_entries: Vec<_> = SA_TABLE_15.days[79]
+    let e = SA_TABLE_15.days[79]
         .entries
         .iter()
-        .filter(|e| e.minutes == 1080)
-        .collect();
-    if let Some(e) = noon_entries.first() {
-        assert!(e.rotation.is_some());
-        assert_approx!(e.rotation.unwrap(), 0.0, 5.0);
-    }
+        .find(|e| e.minutes == 1080)
+        .expect("should have entry at minute 1080");
+    assert!(e.rotation.is_some());
+    assert_approx!(e.rotation.unwrap(), 0.0, 5.0);
 }
 
 #[test]
 fn test_single_axis_morning_negative_afternoon_positive() {
     let entries = &SA_TABLE_15.days[79].entries;
-    // Morning in UTC: ~960 minutes (16:00 UTC ~ 10am local solar)
+    // Morning in UTC: ~960 minutes (16:00 UTC ~ 10am local clock time)
     let morning = entries
         .iter()
-        .find(|e| e.rotation.is_some() && e.minutes >= 960 && e.minutes < 1065);
+        .find(|e| e.rotation.is_some() && e.minutes >= 960 && e.minutes < 1065)
+        .expect("should have a morning entry with rotation");
+    assert!(morning.rotation.unwrap() < 0.0);
     // Afternoon in UTC: >1095 minutes
     let afternoon = entries
         .iter()
-        .find(|e| e.rotation.is_some() && e.minutes > 1095);
-    if let Some(m) = morning {
-        assert!(m.rotation.unwrap() < 0.0);
-    }
-    if let Some(a) = afternoon {
-        assert!(a.rotation.unwrap() > 0.0);
-    }
+        .find(|e| e.rotation.is_some() && e.minutes > 1095)
+        .expect("should have an afternoon entry with rotation");
+    assert!(afternoon.rotation.unwrap() > 0.0);
 }
 
 // ── Dual axis one day ──
@@ -211,15 +207,13 @@ fn test_dual_axis_entries_type() {
 #[test]
 fn test_dual_axis_tilt_matches_zenith_at_noon() {
     // Solar noon for Springfield in UTC is around minute 1080
-    let noon_entries: Vec<_> = DA_TABLE_15.days[79]
+    let e = DA_TABLE_15.days[79]
         .entries
         .iter()
-        .filter(|e| e.minutes == 1080)
-        .collect();
-    if let Some(e) = noon_entries.first() {
-        assert!(e.tilt.is_some());
-        assert_approx!(e.tilt.unwrap(), 40.0, 5.0);
-    }
+        .find(|e| e.minutes == 1080)
+        .expect("should have entry at minute 1080");
+    assert!(e.tilt.is_some());
+    assert_approx!(e.tilt.unwrap(), 40.0, 5.0);
 }
 
 // ── Full year generation ──
