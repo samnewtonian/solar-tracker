@@ -1,6 +1,6 @@
 # solar-tracker
 
-Solar angle calculation library for computing optimal solar panel angles based on date, time, and geographic position. Supports fixed installations, single-axis trackers, and dual-axis trackers.
+- Solar angle calculation library for computing optimal solar panel angles based on date, time, and geographic position. Supports fixed installations, single-axis trackers, and dual-axis trackers.
 
 Implemented in Clojure (reference implementation), Python, and Rust. Uses standard solar position algorithms (NOAA / Duffie & Beckman).
 
@@ -28,7 +28,7 @@ Implemented in Clojure (reference implementation), Python, and Rust. Uses standa
 
 ### Clojure
 
-Add as a git dependency in your `deps.edn` (use `:deps/root` since the Clojure source lives under `clojure/`):
+Add as a git dependency in your `deps.edn` (don't forget `:deps/root`):
 
 ```clojure
 {:deps
@@ -45,9 +45,9 @@ Then in your code:
 (import '[java.time ZonedDateTime ZoneId])
 
 ;; Calculate solar position for Springfield, IL on March 21 at noon Central Time
-;; Pass any timezone-aware ZonedDateTime — converted to UTC internally
-(sa/solar-position 39.8 -89.6
-                   (ZonedDateTime/of 2026 3 21 12 0 0 0 (ZoneId/of "America/Chicago")))
+;; ZoneId handles DST automatically
+(def dt (ZonedDateTime/of 2026 3 21 12 0 0 0 (ZoneId/of "America/Chicago")))
+(def pos (sa/solar-position 39.8 -89.6 dt))
 ;; => {:day-of-year 80
 ;;     :declination -0.40
 ;;     :equation-of-time -7.86
@@ -58,14 +58,11 @@ Then in your code:
 ;;     :azimuth 176.34}
 
 ;; Dual-axis tracker angles
-(let [dt (ZonedDateTime/of 2026 6 21 14 30 0 0 (ZoneId/of "America/Chicago"))]
-  (sa/dual-axis-angles (sa/solar-position 39.8 -89.6 dt)))
+(sa/dual-axis-angles pos)
 ;; => {:tilt <zenith>, :panel-azimuth <facing-sun>}
 
 ;; Single-axis tracker rotation
-(let [dt (ZonedDateTime/of 2026 3 21 15 0 0 0 (ZoneId/of "America/Chicago"))
-      pos (sa/solar-position 39.8 -89.6 dt)]
-  (sa/single-axis-tilt pos 39.8))
+(sa/single-axis-tilt pos 39.8)
 
 ;; Optimal fixed tilt for a latitude
 (sa/optimal-fixed-tilt 39.8)   ;; => 33.3°
@@ -85,7 +82,8 @@ from datetime import datetime
 from zoneinfo import ZoneInfo
 
 # ZoneInfo handles DST automatically
-pos = solar_position(39.8, -89.6, datetime(2026, 3, 21, 12, 0, tzinfo=ZoneInfo("America/Chicago")))
+dt = datetime(2026, 3, 21, 12, 0, tzinfo=ZoneInfo("America/Chicago"))
+pos = solar_position(39.8, -89.6, dt)
 
 # Dual-axis tracker angles
 da = dual_axis_angles(pos)
@@ -120,7 +118,6 @@ use chrono::TimeZone;
 use chrono_tz::America::Chicago;
 
 // Calculate solar position for Springfield, IL on March 21 at noon Central Time
-// Pass any chrono timezone-aware DateTime — converted to UTC internally
 // chrono_tz handles DST automatically
 let dt = Chicago.with_ymd_and_hms(2026, 3, 21, 12, 0, 0).unwrap();
 let pos = solar_position(39.8, -89.6, &dt);
@@ -131,9 +128,7 @@ let da = dual_axis_angles(&pos);
 // da.tilt, da.panel_azimuth
 
 // Single-axis tracker rotation
-let dt2 = Chicago.with_ymd_and_hms(2026, 3, 21, 15, 0, 0).unwrap();
-let pos2 = solar_position(39.8, -89.6, &dt2);
-let rotation = single_axis_tilt(&pos2, 39.8);
+let rotation = single_axis_tilt(&pos, 39.8);
 
 // Optimal fixed tilt for a latitude
 optimal_fixed_tilt(39.8); // => 33.3°
@@ -222,4 +217,4 @@ cd rust && cargo test
 
 © 2026 Kardashev Type V
 
-Licensed under the [`LICENSE`](Apache License, Version 2.0)
+Licensed under the Apache License, Version 2.0
